@@ -29,7 +29,8 @@ zsh
 
 A persistent parent shell waiting for a child remained reported as the parent process, while a shell that directly execed a simple command changed identity with the process itself.
 Claude, Codex, OpenCode, and Grok were observed under their own process names.
-Pi remained a generic `node` process and is intentionally inconclusive.
+Pi and Cursor Agent both remained a generic `node` process and are intentionally inconclusive; a generic interpreter is `unknown`, never confidently dead, so an ambiguous read cannot license a duplicate process.
+The Cursor Agent process capture is recorded in [`../cursor-agent-harness.md`](../cursor-agent-harness.md); Cursor is crewmate/scout-only and never eligible for secondmate recovery, so this gap does not weaken secondmate liveness.
 
 The OpenCode 1.18.4 busy-queue behavior and the tmux fallback are pinned by:
 
@@ -331,3 +332,9 @@ The host-tool sequence was:
 Observed guarantee: a Desktop-owned thread can write Firstmate lifecycle files when the prompt provides an authorized absolute path, and create, send, read, and archive work at the Desktop host-tool layer.
 The missing guarantee remains a supported shell-callable bridge that lets Firstmate perform those operations against the same visible Desktop endpoint.
 App-server partial methods and raw socket experiments do not satisfy that bridge contract.
+
+## Cursor Agent
+
+Cursor Agent is a crewmate/scout-only harness that runs on top of the runtime backends above rather than being a backend itself.
+Its launch, model mapping, composer-classification, and process-liveness evidence, verified on 2026-07-23 against Cursor Agent `2026.07.20-8cc9c0b`, are recorded in full in [`../cursor-agent-harness.md`](../cursor-agent-harness.md).
+The cross-backend review confirming each backend's shared busy regex and composer classifier handle Cursor's `→` idle glyph and on-row `ctrl+c to stop` busy hint lives in the same record.

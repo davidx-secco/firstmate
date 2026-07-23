@@ -220,6 +220,10 @@
       "audience": "operator-current"
     },
     {
+      "path": "docs/cursor-agent-harness.md",
+      "audience": "maintainer-verification"
+    },
+    {
       "path": "docs/decision-hold-lifecycle.md",
       "audience": "maintainer-architecture"
     },
