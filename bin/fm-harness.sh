@@ -137,6 +137,15 @@ harness_is_crew_only() {
 # else claude. An EXPLICIT config/secondmate-harness token is honoured verbatim
 # and still gets fm-spawn.sh's explicit refusal, so pinning that file remains the
 # way to override this.
+#
+# The stderr line carries the stable marker "crew-only-harness-skip: " ahead of a
+# self-contained reason. That marker is a CONTRACT: an automated caller that
+# captures this stderr (bin/fm-bootstrap.sh's secondmate liveness sweep, whose
+# success branch is otherwise quiet) lifts the text after it verbatim and reports
+# the harness substitution as its own visible fact, so an unattended respawn on a
+# substituted harness is never silent. Keep the marker and the reason's
+# self-contained wording intact when editing this message.
+CREW_ONLY_SKIP_MARKER='crew-only-harness-skip: '
 resolve_secondmate() {
   local sm own
   sm=$(secondmate_field 1)
@@ -145,7 +154,7 @@ resolve_secondmate() {
   if harness_is_crew_only "$sm"; then
     own=$(detect_own)
     if [ -z "$own" ] || [ "$own" = unknown ] || harness_is_crew_only "$own"; then own=claude; fi
-    echo "warning: crew harness '$sm' is a crewmate/scout-only harness and cannot back a secondmate; resolving secondmate harness to '$own' instead (pin config/secondmate-harness to override)" >&2
+    echo "warning: ${CREW_ONLY_SKIP_MARKER}crew harness '$sm' is a crewmate/scout-only harness and cannot back a secondmate; resolved to '$own' instead (pin config/secondmate-harness to override)" >&2
     echo "$own"
     return
   fi

@@ -422,7 +422,7 @@ secondmate_liveness_sweep() {
   # primary-only no-op there. Mid-session liveness remains explicitly out of
   # scope and requires a separate periodic signal.
   [ -d "$STATE" ] || return 0
-  local meta id window harness backend target agent_state out cause
+  local meta id window harness backend target agent_state out cause harness_note
   SECONDMATE_RESPAWNED_IDS=""
   for meta in "$STATE"/*.meta; do
     [ -f "$meta" ] || continue
@@ -456,6 +456,16 @@ secondmate_liveness_sweep() {
         fi
         if out=$(FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$id" --secondmate 2>&1); then
           SECONDMATE_RESPAWNED_IDS="$SECONDMATE_RESPAWNED_IDS $id"
+          # A successful respawn is normally silent, but bin/fm-harness.sh may have
+          # SUBSTITUTED the launch harness because config/crew-harness names a
+          # crewmate/scout-only adapter that cannot back a secondmate. That is a
+          # captain-relevant deviation from the configured harness, so lift the
+          # reason from the resolver's marked stderr line and report it as an
+          # actionable fact regardless of FM_BOOTSTRAP_VERBOSE_FACTS.
+          harness_note=$(printf '%s\n' "$out" | sed -n 's/.*crew-only-harness-skip: //p' | head -1)
+          if [ -n "$harness_note" ]; then
+            echo "SECONDMATE_LIVENESS: secondmate $id: respawned after $cause with a substituted harness: $harness_note (backend=$backend)"
+          fi
           if [ "${FM_BOOTSTRAP_VERBOSE_FACTS:-0}" = 1 ]; then
             echo "BOOTSTRAP_INFO: secondmate $id relaunched after $cause (backend=$backend)"
           fi

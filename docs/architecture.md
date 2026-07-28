@@ -173,7 +173,7 @@ Secondmate homes converge conservatively to the primary's version and declared i
 The [`secondmate-provisioning` skill](../.agents/skills/secondmate-provisioning/SKILL.md) owns the full guarded sync, propagation, nudge, and mid-session local-material push contract.
 
 Secondmate agents can run on a different verified primary harness than crewmates.
-Cursor is crewmate/scout-only and is refused for secondmate launch.
+Cursor is crewmate/scout-only: an explicit `config/secondmate-harness` pin to it is refused at spawn, while the `config/crew-harness` fallback step skips it to a secondmate-capable harness with a loud reason instead of inheriting it.
 `config/secondmate-harness` controls the primary's secondmate launch harness and may also carry optional model and effort tokens as `<harness> [<model>] [<effort>]` on the first non-empty, non-comment line.
 A bare harness line remains harness-only, so existing `config/secondmate-harness` files keep their previous behavior.
 When the harness token is unset or `default`, launch falls back to `config/crew-harness`, then to the primary's own harness, and the model and effort tokens are ignored.

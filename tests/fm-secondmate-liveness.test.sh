@@ -356,6 +356,33 @@ test_sweep_respawns_confirmed_dead_secondmate() {
   pass "sweep: a confirmed-dead secondmate endpoint is killed and respawned"
 }
 
+# An unattended respawn must never change the launch harness silently. When
+# config/crew-harness names a crewmate/scout-only adapter, bin/fm-harness.sh
+# substitutes a secondmate-capable one; the reason has to reach the captain on the
+# ORDINARY success path, not only under FM_BOOTSTRAP_VERBOSE_FACTS.
+test_sweep_reports_substituted_harness_on_crew_only_crew_harness() {
+  local w fb tmuxfb log out
+  w=$(new_world sweep-crew-only-substitution)
+  printf 'cursor\n' > "$w/home/config/crew-harness"
+  add_sm_home "$w" sm1 firstmate:fm-sm1
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+
+  out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" zsh "$log" CLAUDECODE=1)
+
+  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawned after confirmed agent absence on existing endpoint with a substituted harness:" \
+    "a harness substitution on the automatic respawn path must be reported without verbose diagnostics"
+  assert_contains "$out" "'cursor' is a crewmate/scout-only harness and cannot back a secondmate" \
+    "the reported fact must name the concrete reason for the substitution"
+  assert_contains "$out" "resolved to 'claude' instead" \
+    "the reported fact must name the harness the secondmate actually launched on"
+  assert_contains "$out" "pin config/secondmate-harness to override" \
+    "the reported fact must name the override"
+  assert_contains "$(cat "$log")" "new-window" \
+    "the secondmate should still be relaunched on the substituted harness"
+  pass "sweep: a crew-only crew harness substitution is reported unconditionally on the successful respawn path"
+}
+
 test_sweep_leaves_alive_secondmate_untouched() {
   local w fb tmuxfb log out
   w=$(new_world sweep-alive)
@@ -512,6 +539,7 @@ test_tmux_agent_state_rejects_malformed_targets_before_probe
 test_herdr_agent_state_preserves_husk_classifier
 test_agent_state_dispatcher_and_compatibility
 test_sweep_respawns_confirmed_dead_secondmate
+test_sweep_reports_substituted_harness_on_crew_only_crew_harness
 test_sweep_leaves_alive_secondmate_untouched
 test_sweep_respawns_authoritatively_missing_pi_secondmate
 test_sweep_never_acts_on_ambiguous_existing_process
