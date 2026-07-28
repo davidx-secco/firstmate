@@ -48,6 +48,28 @@
 # they have no ghost styling to strip and rely on the idle-placeholder match
 # below. Re-sourcing is a cheap idempotent redefinition, so this file needs no
 # include guard (matching bin/fm-tmux-lib.sh).
+#
+# This owner also holds the two fleet-wide per-harness SIGNATURE SETS the
+# classification depends on, so a newly verified harness's signature is added
+# once instead of once per adapter (the drift that motivated the consolidation):
+#
+#   FM_COMPOSER_BUSY_REGEX_DEFAULT - busy-only footer/stop hints, OR-ed, matched
+#     case-insensitively. claude/codex: "esc to interrupt"; opencode: "esc
+#     interrupt"; pi: "Working..."; grok: "Ctrl+c:cancel" (its mid-turn cancel
+#     hint, shown iff a turn is running - verified grok 0.2.73); Cursor Agent:
+#     "ctrl+c to stop" (rendered on the composer row itself while generating -
+#     verified 2026.07.20-8cc9c0b). All ASCII, to avoid the locale fragility of
+#     matching each TUI's spinner glyph directly.
+#   FM_COMPOSER_IDLE_REGEX_DEFAULT - whole-row idle/ghost placeholder text a
+#     harness draws into an otherwise-empty composer: grok's "Type a
+#     message..." (verified 0.2.82) and Cursor Agent's "Add a follow-up" /
+#     "Plan, search, build anything".
+#
+# Each adapter keeps its own FM_* override variable name (FM_BUSY_REGEX,
+# FM_COMPOSER_IDLE_RE, FM_BACKEND_<NAME>_IDLE_RE, ...) and simply defaults to
+# these; the per-adapter names are the documented operator override surface.
+FM_COMPOSER_BUSY_REGEX_DEFAULT='esc (to )?interrupt|Working\.\.\.|Ctrl\+c:cancel|ctrl\+c to stop'
+FM_COMPOSER_IDLE_REGEX_DEFAULT='^(Type a message\.\.\.|Add a follow-up|Plan, search, build anything)$'
 
 # fm_composer_strip_ansi: drop every CSI escape sequence, leaving plain text.
 # Used for STRUCTURAL row/shape detection, where ghost text must be KEPT so the

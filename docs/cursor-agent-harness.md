@@ -112,7 +112,7 @@ Subscription Tier   Team
 One-shot prompt command:
 
 ```sh
-agent --print --mode ask --model cursor-grok-4.5-low --trust --workspace "$(pwd)" \
+agent --print --model cursor-grok-4.5-low --trust --workspace "$(pwd)" \
   "Reply with exactly the four characters PONG and nothing else."
 ```
 
@@ -142,10 +142,10 @@ Firstmate uses only the concrete Cursor Grok entries above for its default mappi
 
 ### Interactive tmux supervision
 
-Command typed into a scratch tmux window:
+Command typed into a scratch tmux window, in Cursor's default mode - no `--mode` flag, matching the shipped launch template:
 
 ```sh
-agent --force --trust --workspace "$PWD" --mode ask \
+agent --force --trust --workspace "$PWD" \
   --model cursor-grok-4.5-low 'Reply with exactly PONG.'
 ```
 
@@ -162,13 +162,20 @@ Observed idle capture:
 ```text
 PONG
 → Add a follow-up
-Ask (shift+tab to cycle)
 Cursor Grok 4.5 Low · 15.8%                                   Run Everything
 ```
 
 The shared tmux composer classifier returned `empty` for that idle pane.
 The first idle `Ctrl+C` produced exactly `Press Ctrl+C again to exit`.
 The second `Ctrl+C` returned the pane to `zsh`.
+
+#### Default-mode re-capture (2026-07-28)
+
+The signatures above were first captured with `--mode ask`, which the shipped launch template does not pass.
+They were re-captured on 2026-07-28 with Cursor Agent `2026.07.20-8cc9c0b` on macOS arm64 in default mode, and are identical.
+The busy row is `⠀⠞ Working`, with `ctrl+c to stop` rendered on the `→ Add a follow-up` composer row; the idle composer row is `→ Add a follow-up`; `pane_current_command` is `node`.
+The only difference is that default mode omits the ask-mode-only `Ask (shift+tab to cycle)` line.
+That line is cosmetic mode signage and is never used as a classifier signature, so both the busy signature (`ctrl+c to stop`) and the idle placeholder (`Add a follow-up`) hold in the mode the adapter actually launches.
 
 ### tmux process identity
 

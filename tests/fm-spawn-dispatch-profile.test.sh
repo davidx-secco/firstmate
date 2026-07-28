@@ -348,6 +348,28 @@ test_cursor_maps_effort_to_concrete_model() {
   pass "cursor maps xhigh effort to its highest verified concrete model"
 }
 
+test_cursor_maps_effort_when_model_is_the_default_sentinel() {
+  local rec id out status launch
+  id=profile-cursor-default-model-z22
+  rec=$(make_spawn_case profile-cursor-default-model cursor "$id")
+  read_case_record "$rec"
+
+  # model_flag_for_harness treats "default" as no model and emits no flag, and
+  # cursor has no effort flag to degrade to, so gating the mapping on MODEL_SET
+  # would silently drop the effort axis entirely for this input.
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --model default --effort xhigh)
+  status=$?
+  expect_code 0 "$status" "cursor spawn with --model default and xhigh effort should succeed"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" cursor cursor-grok-4.5-high xhigh
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "--model 'cursor-grok-4.5-high'" \
+    "cursor dropped the effort axis when the model was the 'default' sentinel"
+  assert_not_contains "$launch" "--model 'default'" "cursor must not pass the 'default' sentinel as a model id"
+  assert_not_contains "$launch" "--effort" "cursor launch must not invent an effort flag"
+  pass "cursor maps effort to a concrete model when --model is the 'default' sentinel"
+}
+
 test_cursor_preserves_unrelated_explicit_model() {
   local rec id out status launch
   id=profile-cursor-explicit-z19
@@ -474,6 +496,7 @@ test_grok_omits_invalid_max_reasoning_effort
 test_grok_omits_invalid_xhigh_reasoning_effort
 test_opencode_threads_model_and_ignores_effort_axis
 test_cursor_maps_effort_to_concrete_model
+test_cursor_maps_effort_when_model_is_the_default_sentinel
 test_cursor_preserves_unrelated_explicit_model
 test_cursor_preserves_explicit_in_family_model
 test_cursor_refuses_secondmate_launch

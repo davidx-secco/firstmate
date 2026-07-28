@@ -526,12 +526,16 @@ if [ "$KIND" = secondmate ] && [ -z "$ARG3" ]; then
 fi
 
 # Cursor exposes no standalone effort flag. Its catalog encodes effort in model
-# ids, so when no explicit model was requested, map Firstmate's effort axis onto
+# ids, so when no CONCRETE model was requested, map Firstmate's effort axis onto
 # the empirically listed Cursor Grok 4.5 models. xhigh/max cap at that family's
 # highest listed model. An explicitly selected model always wins unchanged
 # rather than being remapped or receiving an invented suffix or bracket
-# override.
-if [ "$HARNESS" = cursor ] && [ -n "$EFFORT" ] && [ "$MODEL_SET" -eq 0 ]; then
+# override. The gate is "no concrete model", not MODEL_SET: model_flag_for_harness
+# treats the sentinel "default" as no model and emits no flag, so `--model default`
+# would otherwise drop the effort axis entirely (Cursor has no effort flag to fall
+# back on, unlike every other harness).
+if [ "$HARNESS" = cursor ] && [ -n "$EFFORT" ] \
+   && { [ -z "$MODEL" ] || [ "$MODEL" = default ]; }; then
   case "$EFFORT" in
     low) MODEL=cursor-grok-4.5-low ;;
     medium) MODEL=cursor-grok-4.5-medium ;;

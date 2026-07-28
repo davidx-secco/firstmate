@@ -67,7 +67,7 @@ test_harness_resolution() {
     mkdir -p "$cfg"
     [ "$crew" = "-" ] || printf '%s\n' "$crew" > "$cfg/crew-harness"
     [ "$sm" = "-" ] || printf '%s\n' "$sm" > "$cfg/secondmate-harness"
-    got_sm=$(CLAUDECODE=1 FM_CONFIG_OVERRIDE="$cfg" "$ROOT/bin/fm-harness.sh" secondmate)
+    got_sm=$(CLAUDECODE=1 FM_CONFIG_OVERRIDE="$cfg" "$ROOT/bin/fm-harness.sh" secondmate 2>/dev/null)
     got_crew=$(CLAUDECODE=1 FM_CONFIG_OVERRIDE="$cfg" "$ROOT/bin/fm-harness.sh" crew)
     [ "$got_sm" = "$exp_sm" ] || fail "$label: secondmate resolved '$got_sm', expected '$exp_sm'"
     [ "$got_crew" = "$exp_crew" ] || fail "$label: crew resolved '$got_crew', expected '$exp_crew'"
@@ -76,12 +76,54 @@ both absent -> own (backward-compat)^-^-^claude^claude
 crew set, secondmate absent -> crew (backward-compat)^codex^-^codex^codex
 crew set, secondmate set -> secondmate wins, crew untouched^codex^grok^grok^codex
 Cursor crewmate runtime resolves without becoming the secondmate^cursor^claude^claude^cursor
+crew=cursor, secondmate absent -> crew-only harness skipped, own^cursor^-^claude^cursor
+crew=cursor, secondmate=default -> crew-only harness skipped, own^cursor^default^claude^cursor
 crew absent, secondmate set -> secondmate value, crew own^-^grok^grok^claude
 secondmate=default defers to crew^codex^default^codex^codex
 crew=default resolves to own, secondmate follows^default^-^claude^claude
 secondmate=default with crew absent -> own^-^default^claude^claude
 ROWS
   pass "A1 fm-harness.sh secondmate resolves the fallback chain; crew mode unchanged"
+}
+
+# A2: config/crew-harness=cursor is the natural way to make Cursor the default
+# crewmate runtime, but cursor is a crewmate/scout-only harness that fm-spawn.sh
+# refuses for --secondmate. Inheriting it through the crew fallback would make
+# every secondmate spawn - including the watchdog respawn - fail with a bare
+# SECONDMATE_LIVENESS respawn-failed. The skip must therefore happen at
+# resolution and must be LOUD, naming the reason and the override.
+test_crew_only_harness_not_inherited_by_secondmate() {
+  local case_dir cfg out err sm n
+  n=0
+  for sm in ABSENT default; do
+    n=$((n + 1))
+    case_dir="$TMP_ROOT/crew-only-$n"
+    cfg="$case_dir/config"
+    mkdir -p "$cfg"
+    printf 'cursor\n' > "$cfg/crew-harness"
+    [ "$sm" = ABSENT ] || printf '%s\n' "$sm" > "$cfg/secondmate-harness"
+    out=$(CLAUDECODE=1 FM_CONFIG_OVERRIDE="$cfg" "$ROOT/bin/fm-harness.sh" secondmate 2>"$case_dir/err") \
+      || fail "secondmate-harness=$sm with crew=cursor: resolution exited non-zero"
+    err=$(cat "$case_dir/err")
+    [ "$out" = claude ] || fail "secondmate-harness=$sm with crew=cursor: resolved '$out', expected the own harness 'claude'"
+    case "$err" in
+      *"crewmate/scout-only"*) : ;;
+      *) fail "secondmate-harness=$sm with crew=cursor: warning did not state the crewmate/scout-only reason: $err" ;;
+    esac
+    case "$err" in
+      *config/secondmate-harness*) : ;;
+      *) fail "secondmate-harness=$sm with crew=cursor: warning did not name the config/secondmate-harness override: $err" ;;
+    esac
+  done
+  # An EXPLICIT cursor pin is honoured verbatim so fm-spawn.sh's own refusal
+  # stays the single authority on an operator's deliberate choice.
+  case_dir="$TMP_ROOT/crew-only-explicit"
+  cfg="$case_dir/config"
+  mkdir -p "$cfg"
+  printf 'cursor\n' > "$cfg/secondmate-harness"
+  out=$(CLAUDECODE=1 FM_CONFIG_OVERRIDE="$cfg" "$ROOT/bin/fm-harness.sh" secondmate 2>/dev/null)
+  [ "$out" = cursor ] || fail "an explicit secondmate-harness=cursor pin resolved '$out', expected 'cursor'"
+  pass "A2 a crewmate-only crew harness is skipped loudly for secondmate resolution; an explicit pin is preserved"
 }
 
 # ===========================================================================
@@ -2050,6 +2092,7 @@ SH
 }
 
 test_harness_resolution
+test_crew_only_harness_not_inherited_by_secondmate
 test_secondmate_model_effort_tokens
 test_propagate_lib
 test_spawn_split_and_inherit

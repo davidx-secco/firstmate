@@ -8,7 +8,11 @@
 #                                        config/crew-harness -> own. "default" or absent
 #                                        defers to the crew resolution, so an unset
 #                                        secondmate-harness behaves exactly as the crew
-#                                        harness did before this knob existed.
+#                                        harness did before this knob existed. A
+#                                        crewmate/scout-only crew harness (cursor) is
+#                                        never inherited by that fallback: it is skipped
+#                                        with a warning on stderr and resolves to own,
+#                                        else claude.
 #        fm-harness.sh secondmate-model    print the optional MODEL token from
 #                                        config/secondmate-harness, or empty when absent.
 #        fm-harness.sh secondmate-effort   print the optional EFFORT token from
@@ -107,16 +111,45 @@ secondmate_field() {
   esac
 }
 
+# Harnesses verified ONLY as crewmate/scout runtimes. They can never back a
+# secondmate, which needs the primary session-start, turn-end, and watcher
+# integrations these adapters do not expose (bin/fm-spawn.sh refuses
+# --secondmate for them). Keep this in sync with that refusal.
+harness_is_crew_only() {
+  case "$1" in
+    cursor) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Resolve the harness the PRIMARY uses to launch SECONDMATE agents: a fallback
 # chain config/secondmate-harness -> config/crew-harness -> own. An absent or
 # "default" secondmate-harness token defers to the crew resolution, so an unset
 # secondmate-harness behaves exactly as before this knob existed (a secondmate
 # launched on the crew harness). config/secondmate-harness is the PRIMARY's own
 # setting and is never inherited downstream - secondmates do not spawn secondmates.
+#
+# The crew fallback is INHERITANCE, not an explicit secondmate choice, so a
+# crewmate-only crew harness (cursor) must not be inherited: doing so would make
+# every secondmate spawn - including watchdog respawns - fail with a bare
+# SECONDMATE_LIVENESS respawn-failed. Skip it LOUDLY on stderr (stdout stays the
+# single resolved harness token) and fall through to the primary's own harness,
+# else claude. An EXPLICIT config/secondmate-harness token is honoured verbatim
+# and still gets fm-spawn.sh's explicit refusal, so pinning that file remains the
+# way to override this.
 resolve_secondmate() {
-  local sm
+  local sm own
   sm=$(secondmate_field 1)
-  if [ -z "$sm" ] || [ "$sm" = "default" ]; then resolve_crew; else echo "$sm"; fi
+  if [ -n "$sm" ] && [ "$sm" != "default" ]; then echo "$sm"; return; fi
+  sm=$(resolve_crew)
+  if harness_is_crew_only "$sm"; then
+    own=$(detect_own)
+    if [ -z "$own" ] || [ "$own" = unknown ] || harness_is_crew_only "$own"; then own=claude; fi
+    echo "warning: crew harness '$sm' is a crewmate/scout-only harness and cannot back a secondmate; resolving secondmate harness to '$own' instead (pin config/secondmate-harness to override)" >&2
+    echo "$own"
+    return
+  fi
+  echo "$sm"
 }
 
 # Print the optional model token (2nd field) from config/secondmate-harness, or

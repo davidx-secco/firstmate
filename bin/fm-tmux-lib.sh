@@ -60,11 +60,12 @@
 # shellcheck source=bin/fm-composer-lib.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/fm-composer-lib.sh"
 
-# Busy footers per harness (mirror fm-watch.sh). claude/codex: "esc to
-# interrupt"; opencode: "esc interrupt"; pi: "Working..."; grok: "Ctrl+c:cancel";
-# Cursor Agent: "ctrl+c to stop". ASCII hints avoid spinner-glyph fragility.
-FM_TMUX_BUSY_REGEX_DEFAULT='esc (to )?interrupt|Working\.\.\.|Ctrl\+c:cancel|ctrl\+c to stop'
-FM_TMUX_IDLE_REGEX_DEFAULT='^(Type a message\.\.\.|Add a follow-up|Plan, search, build anything)$'
+# Busy footers and idle placeholders come from the shared composer owner sourced
+# above (FM_COMPOSER_{BUSY,IDLE}_REGEX_DEFAULT in bin/fm-composer-lib.sh), so a
+# newly verified harness's signature is added in exactly one place. These aliases
+# keep the tmux-facing names stable for callers and tests.
+FM_TMUX_BUSY_REGEX_DEFAULT=$FM_COMPOSER_BUSY_REGEX_DEFAULT
+FM_TMUX_IDLE_REGEX_DEFAULT=$FM_COMPOSER_IDLE_REGEX_DEFAULT
 
 # fm_tmux_strip_ghost: thin adapter over the shared, fleet-wide ghost extractor
 # fm_composer_strip_ghost (bin/fm-composer-lib.sh). It drops de-emphasised

@@ -188,6 +188,8 @@ When it is absent or contains `default`, crewmates mirror the firstmate's own ha
 The first non-empty, non-comment line is parsed as `<harness> [<model>] [<effort>]`.
 A bare `<harness>` preserves the previous behavior: harness only, with no model or effort launch flag.
 When the harness token is absent or `default`, secondmate launch falls back through `config/crew-harness` and then the primary's own harness, and no model or effort is read from that file.
+That fallback never inherits a crewmate/scout-only harness: when `config/crew-harness` is `cursor`, secondmate resolution skips it with a warning on stderr and resolves to the primary's own harness, falling back to `claude`, so a secondmate respawn is not blocked by the crew setting.
+Pinning `config/secondmate-harness` overrides that; pinning it to `cursor` explicitly is still refused at spawn.
 `fm-harness.sh secondmate-model` and `fm-harness.sh secondmate-effort` expose only the optional tokens from `config/secondmate-harness`; `config/crew-harness` remains a bare adapter-name file.
 An explicit harness argument to `fm-spawn.sh` still overrides either config file for that spawn only.
 An explicit `--model` or `--effort` overrides the matching token from `config/secondmate-harness`; an explicit harness or raw launch command starts with clean model and effort defaults unless those flags are also passed.
@@ -437,7 +439,7 @@ FM_FLEET_SYNC_PACKED_REFS_LOCK_RETRIES=3        # fetch retries after fm-fleet-s
 FM_FLEET_SYNC_PACKED_REFS_LOCK_RETRY_WAIT_SECS=1 # seconds fm-fleet-sync.sh waits before each of those retries
 FM_FLEET_SYNC_PACKED_REFS_LOCK_AGE_SECS=30       # min mtime age before fm-fleet-sync.sh treats a leftover packed-refs.lock as provably stale
 FM_BUSY_REGEX='esc (to )?interrupt|Working\.\.\.|Ctrl\+c:cancel|ctrl\+c to stop'   # busy-pane signatures, shared by watcher, fm-crew-state pane fallback, the tmux helper, and the orca/cmux/herdr composer classifiers' busy short-circuit
-FM_COMPOSER_IDLE_RE=    # optional empty-composer regex override, applied after ghost and border stripping; unset uses the tmux default placeholder set (bin/fm-tmux-lib.sh's FM_TMUX_IDLE_REGEX_DEFAULT)
+FM_COMPOSER_IDLE_RE=    # optional empty-composer regex override, applied after ghost and border stripping; unset uses the shared placeholder set owned by bin/fm-composer-lib.sh (FM_COMPOSER_IDLE_REGEX_DEFAULT, aliased as FM_TMUX_IDLE_REGEX_DEFAULT)
 FM_COMPOSER_GHOST_LUMA_MAX=128   # fleet-wide: max perceived luminance (0.299R+0.587G+0.114B, 0-255) for a TRUECOLOR foreground to count as de-emphasised ghost/placeholder text and be stripped; dim/faint (SGR 2) is stripped regardless. Assumes a dark terminal theme (bin/fm-composer-lib.sh's fm_composer_strip_ghost, shared by the tmux and herdr composer readers)
 GROK_HOME=              # optional Grok config home for firstmate's global grok turn-end hook; defaults to ~/.grok
 FM_SEND_RETRIES=3       # fm-send Enter-retry attempts after typing the line once

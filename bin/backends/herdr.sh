@@ -1829,9 +1829,11 @@ fm_backend_herdr_strip_ansi() {  # <text>
 # that recognized only codex's bold-wrapped bare prompt and missed claude's own
 # dim ghost - the overnight away-mode injection wedge on the primary claude pane.
 FM_BACKEND_HERDR_COMPOSER_LINES=${FM_BACKEND_HERDR_COMPOSER_LINES:-20}
-# Known ghost/placeholder composer text. Extend this if another
-# herdr-verified harness needs its own idle placeholder recognized.
-FM_BACKEND_HERDR_IDLE_RE=${FM_BACKEND_HERDR_IDLE_RE:-'^(Type a message\.\.\.|Add a follow-up|Plan, search, build anything)$'}
+# Known ghost/placeholder composer text, from the shared composer owner
+# (FM_COMPOSER_IDLE_REGEX_DEFAULT, bin/fm-composer-lib.sh). Extend it THERE when
+# another verified harness needs its own idle placeholder recognized, so the set
+# cannot drift between the backends.
+FM_BACKEND_HERDR_IDLE_RE=${FM_BACKEND_HERDR_IDLE_RE:-$FM_COMPOSER_IDLE_REGEX_DEFAULT}
 # Known bare (unbordered) prompt glyphs a composer row may start with: ❯
 # (claude), › (codex), and → (Cursor Agent). Generic shell-style glyphs > $ % #
 # are still recognized after a bordered composer row has been structurally found.
@@ -1840,9 +1842,10 @@ FM_BACKEND_HERDR_BARE_PROMPT_RE=${FM_BACKEND_HERDR_BARE_PROMPT_RE:-'^[❯›→]
 # Agent's "ctrl+c to stop", verified 2026.07.20-8cc9c0b). A found composer row
 # matching this short-circuits to empty - the submit landed and a turn is
 # running - mirroring the tmux/cmux/orca classifiers, so the send-text-submit
-# composer fallback never re-sends Enter into a live turn. FM_BUSY_REGEX
-# overrides, same as everywhere else.
-FM_BACKEND_HERDR_BUSY_REGEX_DEFAULT='esc (to )?interrupt|Working\.\.\.|Ctrl\+c:cancel|ctrl\+c to stop'
+# composer fallback never re-sends Enter into a live turn. The signature set is
+# the shared one (FM_COMPOSER_BUSY_REGEX_DEFAULT, bin/fm-composer-lib.sh);
+# FM_BUSY_REGEX overrides, same as everywhere else.
+FM_BACKEND_HERDR_BUSY_REGEX_DEFAULT=$FM_COMPOSER_BUSY_REGEX_DEFAULT
 # Pi allows a multi-line composer between its horizontal separators. Bound the
 # structural candidate so two unrelated transcript rules with an arbitrarily
 # large region between them can never be promoted into a composer.

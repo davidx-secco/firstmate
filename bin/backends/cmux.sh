@@ -543,9 +543,12 @@ fm_backend_cmux_capture() {  # <target> <lines> [expected-label]
 # busy stop hint on the composer row itself, so a busy-regex match on the found
 # row short-circuits to empty (a landed submit), mirroring fm_tmux_composer_state.
 FM_BACKEND_CMUX_COMPOSER_LINES=${FM_BACKEND_CMUX_COMPOSER_LINES:-20}
-FM_BACKEND_CMUX_IDLE_RE=${FM_BACKEND_CMUX_IDLE_RE:-'^(Type a message\.\.\.|Add a follow-up|Plan, search, build anything)$'}
+# Idle placeholders and busy stop hints come from the shared composer owner
+# (FM_COMPOSER_{IDLE,BUSY}_REGEX_DEFAULT, bin/fm-composer-lib.sh) so a newly
+# verified harness's signature is added once fleet-wide, not once per backend.
+FM_BACKEND_CMUX_IDLE_RE=${FM_BACKEND_CMUX_IDLE_RE:-$FM_COMPOSER_IDLE_REGEX_DEFAULT}
 FM_BACKEND_CMUX_BARE_PROMPT_RE=${FM_BACKEND_CMUX_BARE_PROMPT_RE:-'^→( |$)'}
-FM_BACKEND_CMUX_BUSY_REGEX_DEFAULT='esc (to )?interrupt|Working\.\.\.|Ctrl\+c:cancel|ctrl\+c to stop'
+FM_BACKEND_CMUX_BUSY_REGEX_DEFAULT=$FM_COMPOSER_BUSY_REGEX_DEFAULT
 
 fm_backend_cmux_composer_state() {  # <target> [expected-label] -> empty|pending|unknown
   local target=$1 expected_label=${2:-} cap line trimmed stripped="" found=0 bordered=0
