@@ -254,6 +254,23 @@ Malformed JSON, an empty or malformed rule/default array, an unverified harness,
 While the file remains present, no crewmate or scout spawn may proceed without an explicit resolved harness; malformed configuration must be reported and corrected rather than selected around.
 Secondmate homes inherit this file from the primary, so a secondmate's own crewmates apply the same dispatch profile behavior.
 
+## GitHub account selection (config/gh-accounts / FM_GH_ACCOUNT)
+
+A home with more than one account logged in to `gh` needs to know which account each repository belongs to, because worker copies live outside any per-directory shell hook that a human relies on and would otherwise operate as whichever account is globally active.
+`bin/fm-gh-account.sh` selects the account from the repository's own `origin` owner and passes only that account's credential to one child process; its header and `--help` own the resolution order, the exit codes, and every flag.
+Nothing here switches the active `gh` account, so concurrent workers on different accounts never disturb each other, and a home with a single logged-in account behaves exactly as it did before this selection existed.
+
+The optional local, gitignored `config/gh-accounts` records the mapping for owners that cannot be derived, one `<owner> <account>` pair per line, with `#` comments and blank lines ignored and an `=` accepted in place of the space.
+An owner listed here wins over any derived answer, and an account named here that is not logged in is reported as a configuration error rather than worked around.
+Secondmate homes inherit this file from the primary, so the whole fleet resolves the same owners the same way.
+
+`FM_GH_ACCOUNT=<login>` overrides the selection for one invocation, and `FM_GH_ACCOUNT=none` selects nothing for a lane that needs no GitHub API access at all.
+`bin/fm-spawn.sh` resolves the account before it creates anything, records it as `gh_account=` in the task metadata, and exports the credential into the worker's own shell, so every forge call in that lane inherits the right identity.
+A spawn whose account cannot be determined stops at dispatch with the reason and its fix, because an undetermined identity surfaces otherwise as an unexplained "could not resolve to a Repository" error deep inside a pipeline.
+
+This selection reaches every call firstmate or a worker makes itself, which covers the direct-PR path end to end.
+It does not reach the forge calls no-mistakes makes from its own shared daemon, because that daemon's environment is fixed when it starts and one credential there could not serve more than one account; those calls still use whichever account is globally active.
+
 ## Toolchain
 
 On session start the first mate detects what its required toolchain is missing or too old and lists each problem with either an exact install command or manual instructions.
@@ -288,7 +305,7 @@ When a running home advances and its loaded instruction surface (`AGENTS.md`, `b
 If that send fails, bootstrap keeps an idempotent retry marker and emits `NUDGE_SECONDMATES:` with the failure reason.
 The same bootstrap run emits `SECONDMATE_LIVENESS:` when a registered secondmate is skipped, its relaunch fails, or a successful relaunch had to substitute the launch harness because `config/crew-harness` names a crewmate/scout-only adapter; already-live and ordinary successfully relaunched secondmates are handled silently.
 For a mid-session inherited local-material edit where tracked-file sync is not needed, run `bin/fm-config-push.sh`.
-It uses the same live secondmate discovery and propagation helper as bootstrap, prints each live home's `crew-dispatch.json`, `crew-harness`, `backlog-backend`, `herdr-presentation-spaces`, and `data/captain-shared.md` result as `pushed`, `unchanged`, `skipped`, or `error`, and exits non-zero for real propagation errors or config-reread send failures.
+It uses the same live secondmate discovery and propagation helper as bootstrap, prints each live home's `crew-dispatch.json`, `crew-harness`, `backlog-backend`, `herdr-presentation-spaces`, `gh-accounts`, and `data/captain-shared.md` result as `pushed`, `unchanged`, `skipped`, or `error`, and exits non-zero for real propagation errors or config-reread send failures.
 When an allowlisted config item changes for an already-running home, it sends the literal-content reread pointer described in [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md); unchanged allowlisted config sends no pointer unless a previous delivery is pending.
 The locked bootstrap inheritance pass uses the same per-home changed-set and reread path for already-running homes; see `secondmate-provisioning` for the single contract owner.
 That live discovery starts from `state/*.meta` records with `kind=secondmate`; `data/secondmates.md` only backfills `home=` for older or incomplete meta records.
@@ -409,6 +426,8 @@ FM_CODEX_WATCH_CHECKPOINT=180   # seconds per foreground watcher checkpoint in C
 FM_CREW_STATE_NM_TIMEOUT=10   # seconds allowed per no-mistakes query inside fm-crew-state.sh
 FM_CREW_STATE_RUNS_LIMIT=200  # recent no-mistakes run rows scanned when axi status cannot be attributed to the current code
 FM_CREW_STATE_BIN=bin/fm-crew-state.sh   # test override for the current-state reader used by working/paused watcher triage
+FM_GH_ACCOUNT=          # one-invocation GitHub account override; "none" selects no account at all
+FM_GH_ACCOUNT_TIMEOUT=10   # seconds allowed per repository-visibility probe when a timeout command is available
 FMX_PAIRING_TOKEN=      # X mode pairing token; .env opt-in authorizes replies and eligible lifecycle actions
 FMX_RELAY_URL=https://myfirstmate.io   # optional X relay override, mainly for local relay development
 FMX_ENV_FILE=           # optional alternate .env file for direct X client invocations; bootstrap still checks $FM_HOME/.env
