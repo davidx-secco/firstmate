@@ -263,36 +263,54 @@ fm_backend_orca_read_text_paged() {  # <terminal-id> <limit>
 }
 
 FM_BACKEND_ORCA_COMPOSER_LINES=${FM_BACKEND_ORCA_COMPOSER_LINES:-200}
-FM_BACKEND_ORCA_IDLE_RE=${FM_BACKEND_ORCA_IDLE_RE:-'^Type a message\.\.\.$'}
+# Idle placeholders and busy stop hints come from the shared composer owner
+# (FM_COMPOSER_{IDLE,BUSY}_REGEX_DEFAULT, bin/fm-composer-lib.sh) so a newly
+# verified harness's signature is added once fleet-wide, not once per backend.
+FM_BACKEND_ORCA_IDLE_RE=${FM_BACKEND_ORCA_IDLE_RE:-$FM_COMPOSER_IDLE_REGEX_DEFAULT}
+FM_BACKEND_ORCA_BARE_PROMPT_RE=${FM_BACKEND_ORCA_BARE_PROMPT_RE:-'^→( |$)'}
+FM_BACKEND_ORCA_BUSY_REGEX_DEFAULT=$FM_COMPOSER_BUSY_REGEX_DEFAULT
 
-# fm_backend_orca_composer_state: classify the composer's own bordered row as
-# empty|pending|unknown. Real text stays pending, including a slash-command
+# fm_backend_orca_composer_state: classify the composer's own row - bordered,
+# or bare beginning with Cursor Agent's `→` glyph specifically (NOT the generic
+# `❯`/`›` set, so a dead shell running a starship/pure-style `❯` prompt stays
+# unknown) - as empty|pending|unknown. Cursor renders its busy stop hint on the
+# composer row itself, so a busy-regex match on the found row short-circuits to
+# empty (a landed submit), mirroring fm_tmux_composer_state. Real text stays
+# pending, including a slash-command
 # popup that closed by filling an argument-hint placeholder into the composer;
 # that first Enter selected the popup item, it did not submit the command.
 fm_backend_orca_composer_state() {  # <terminal-id> -> empty|pending|unknown
-  local terminal=$1 cap line trimmed stripped="" found=0
+  local terminal=$1 cap line trimmed stripped="" found=0 bordered=0
   cap=$(fm_backend_orca_read_text_paged "$terminal" "$FM_BACKEND_ORCA_COMPOSER_LINES") || { printf 'unknown'; return 0; }
   while IFS= read -r line; do
     trimmed="${line#"${line%%[![:space:]]*}"}"
     trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
     [ -n "$trimmed" ] || continue
     case "$trimmed" in
-      '│'*'│'|'┃'*'┃'|'|'*'|') : ;;
-      *) continue ;;
+      '│'*'│'|'┃'*'┃'|'|'*'|') bordered=1 ;;
+      *)
+        printf '%s' "$trimmed" | grep -qE "$FM_BACKEND_ORCA_BARE_PROMPT_RE" || continue
+        bordered=0
+        ;;
     esac
     stripped=$trimmed
     found=1
   done < <(printf '%s\n' "$cap")
   [ "$found" -eq 1 ] || { printf 'unknown'; return 0; }
-  stripped=${stripped//│/}
-  stripped=${stripped//┃/}
-  stripped=${stripped//|/}
+  if [ "$bordered" = 1 ]; then
+    stripped=${stripped//│/}
+    stripped=${stripped//┃/}
+    stripped=${stripped//|/}
+  fi
   stripped="${stripped#"${stripped%%[![:space:]]*}"}"
   stripped="${stripped%"${stripped##*[![:space:]]}"}"
-  # A row was found only by the bordered shape above, so content came from a
-  # genuine composer box - delegate to the shared owner with bordered=1. A bare
-  # dead-shell prompt has no bordered row and already returned 'unknown' above.
-  fm_composer_classify_content 1 "$stripped" "$FM_BACKEND_ORCA_IDLE_RE"
+  if [ -n "$stripped" ] \
+     && printf '%s' "$stripped" | grep -qiE "${FM_BUSY_REGEX:-$FM_BACKEND_ORCA_BUSY_REGEX_DEFAULT}"; then
+    printf 'empty'; return 0
+  fi
+  # A bare shape is accepted only for Cursor's own `→` glyph; a dead-shell
+  # prompt cannot reach the shared classifier as an empty composer.
+  fm_composer_classify_content "$bordered" "$stripped" "$FM_BACKEND_ORCA_IDLE_RE"
 }
 
 fm_backend_orca_send_key() {  # <terminal-id> <key>

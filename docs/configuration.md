@@ -174,7 +174,9 @@ The full cmux home label also includes a short hash of the resolved `FM_ROOT` pa
 
 ## Harness support
 
-claude, codex, opencode, pi, and grok are all empirically verified; new harnesses get verified through a supervised trial task before joining the set.
+claude, codex, opencode, pi, and grok are empirically verified primary harnesses.
+Cursor Agent is empirically verified only for crewmate and scout dispatch through the `cursor` adapter; it is not accepted as a primary or secondmate harness.
+New harnesses get verified through a supervised trial task before joining the applicable set.
 The verified adapter knowledge - busy signatures, interrupt and exit commands, skill-invocation syntax, and per-harness quirks - lives in [`.agents/skills/harness-adapters/SKILL.md`](../.agents/skills/harness-adapters/SKILL.md).
 Launch mechanics, including the verified command templates, live in [`bin/fm-spawn.sh`](../bin/fm-spawn.sh).
 Primary-session turn-end guard integrations for verified harnesses are tracked as repo-level hook files and documented in [`docs/turnend-guard.md`](turnend-guard.md).
@@ -186,6 +188,9 @@ When it is absent or contains `default`, crewmates mirror the firstmate's own ha
 The first non-empty, non-comment line is parsed as `<harness> [<model>] [<effort>]`.
 A bare `<harness>` preserves the previous behavior: harness only, with no model or effort launch flag.
 When the harness token is absent or `default`, secondmate launch falls back through `config/crew-harness` and then the primary's own harness, and no model or effort is read from that file.
+That fallback never inherits a crewmate/scout-only harness: when `config/crew-harness` is `cursor`, secondmate resolution skips it with a warning on stderr and resolves to the primary's own harness, falling back to `claude`, so a secondmate respawn is not blocked by the crew setting.
+That warning line carries the stable `crew-only-harness-skip:` marker, and bootstrap's secondmate liveness sweep republishes its reason as a `SECONDMATE_LIVENESS: secondmate <id>: respawned after <cause> with a substituted harness: <reason>` fact, so even an unattended watchdog respawn discloses the substitution rather than changing harness silently.
+Pinning `config/secondmate-harness` overrides that; pinning it to `cursor` explicitly is still refused at spawn.
 `fm-harness.sh secondmate-model` and `fm-harness.sh secondmate-effort` expose only the optional tokens from `config/secondmate-harness`; `config/crew-harness` remains a bare adapter-name file.
 An explicit harness argument to `fm-spawn.sh` still overrides either config file for that spawn only.
 An explicit `--model` or `--effort` overrides the matching token from `config/secondmate-harness`; an explicit harness or raw launch command starts with clean model and effort defaults unless those flags are also passed.
@@ -193,6 +198,7 @@ When `config/crew-dispatch.json` exists, crewmate and scout spawns require an ex
 The inherited-local-material contract is owned by [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md); its harness-relevant consequence is that a secondmate's own crewmates use the primary's dispatch profiles and static harness value.
 Those inherited values are defaults and rules only; `fm-spawn` still permits a consciously chosen explicit runtime outside the config.
 `config/secondmate-harness` is not inherited because secondmates do not launch secondmates.
+For Cursor Agent, `fm-spawn.sh` invokes `agent` explicitly with `--force --trust --workspace <isolated-task-directory>` and maps effort to a concrete Cursor model id without changing global Cursor settings; [`docs/cursor-agent-harness.md`](cursor-agent-harness.md) owns the empirical record and limitations.
 For grok, `fm-spawn.sh` installs one firstmate-owned global turn-end hook under `$GROK_HOME/hooks/`, or `~/.grok/hooks/` when `GROK_HOME` is unset, and drops a per-task `.fm-grok-turnend` pointer in the worktree, with teardown removing the task token and pointer.
 For Pi secondmate launches, `fm-spawn.sh` starts Pi with `-e` pointed at the secondmate home's own tracked `.pi/extensions/fm-primary-pi-watch.ts` and `.pi/extensions/fm-primary-turnend-guard.ts`, both already present from the secondmate home's git worktree.
 
@@ -269,7 +275,7 @@ The locked session-start bootstrap step also runs the guarded local secondmate s
 It emits `SECONDMATE_SYNC:` only when a home was skipped for an actionable sync reason, inheritance failed, or a divergent shared captain-preference copy was quarantined.
 When a running home advances and its loaded instruction surface (`AGENTS.md`, `bin/`, or `.agents/skills/`) changed, bootstrap sends the re-read nudge itself through the stable `fm-<id>` selector and reports the exact completed send as `BOOTSTRAP_INFO:`.
 If that send fails, bootstrap keeps an idempotent retry marker and emits `NUDGE_SECONDMATES:` with the failure reason.
-The same bootstrap run emits `SECONDMATE_LIVENESS:` only when a registered secondmate is skipped or its relaunch fails; already-live and successfully relaunched secondmates are handled silently.
+The same bootstrap run emits `SECONDMATE_LIVENESS:` when a registered secondmate is skipped, its relaunch fails, or a successful relaunch had to substitute the launch harness because `config/crew-harness` names a crewmate/scout-only adapter; already-live and ordinary successfully relaunched secondmates are handled silently.
 For a mid-session inherited local-material edit where tracked-file sync is not needed, run `bin/fm-config-push.sh`.
 It uses the same live secondmate discovery and propagation helper as bootstrap, prints each live home's `crew-dispatch.json`, `crew-harness`, `backlog-backend`, `herdr-presentation-spaces`, and `data/captain-shared.md` result as `pushed`, `unchanged`, `skipped`, or `error`, and exits non-zero for real propagation errors or config-reread send failures.
 When an allowlisted config item changes for an already-running home, it sends the literal-content reread pointer described in [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md); unchanged allowlisted config sends no pointer unless a previous delivery is pending.
@@ -366,16 +372,18 @@ FM_PROC_ROOT_OVERRIDE=   # alternate /proc root for the Linux process-identity r
 FM_BACKEND=             # optional runtime backend override for new spawns; tmux/herdr/zellij/orca/cmux support ship/scout spawns, codex-app is not accepted
 HERDR_SESSION=default  # herdr-only: named session for normal backend ops; not enough for destructive cleanup (docs/herdr-backend.md)
 FM_BACKEND_HERDR_COMPOSER_LINES=20  # herdr-only: tail lines scanned by composer-state guard/fallback paths; idle-baseline submit confirmation uses agent-state
-FM_BACKEND_HERDR_IDLE_RE='^Type a message\.\.\.$'  # herdr-only: empty-composer placeholder regex after shared ghost extraction plus border and prompt stripping
-FM_BACKEND_HERDR_BARE_PROMPT_RE='^[❯›]'  # herdr-only: verified agent glyphs recognized as an UNBORDERED (bare) composer row, e.g. Claude's ❯ or Codex's ›; shell glyphs remain unknown rather than empty, and de-emphasised ghost/placeholder text reads empty through shared fm_composer_strip_ghost (docs/herdr-backend.md "Composer and injection safety")
+FM_BACKEND_HERDR_IDLE_RE='^(Type a message\.\.\.|Add a follow-up|Plan, search, build anything)$'  # herdr-only: empty-composer placeholder regex after shared ghost extraction plus border and prompt stripping; covers grok's and Cursor Agent's verified placeholders
+FM_BACKEND_HERDR_BARE_PROMPT_RE='^[❯›→]'  # herdr-only: verified agent glyphs recognized as an UNBORDERED (bare) composer row - claude's ❯, codex's ›, Cursor Agent's →; shell glyphs remain unknown rather than empty, and de-emphasised ghost/placeholder text reads empty through shared fm_composer_strip_ghost (docs/herdr-backend.md "Composer and injection safety")
 FM_BACKEND_HERDR_PI_COMPOSER_MAX_LINES=8  # herdr-only: maximum rows admitted between Pi's native-identity-corroborated separator pair; taller or ambiguous candidates stay unknown (docs/herdr-backend.md "Composer and injection safety")
 FM_BACKEND_HERDR_SUBMIT_POLLS=6  # herdr-only: agent-state samples spread across each Enter attempt's budget when confirming a submit (docs/herdr-backend.md "Current transport behavior")
 FM_BACKEND_HERDR_SUBMIT_MIN_SLEEP=0.6  # herdr-only: minimum per-Enter confirmation budget before polling agent-state after an idle baseline
 FM_BACKEND_ORCA_COMPOSER_LINES=200  # orca-only: terminal-read lines scanned to locate the composer row for submit verification
-FM_BACKEND_ORCA_IDLE_RE='^Type a message\.\.\.$'  # orca-only: empty-composer placeholder regex after border/prompt stripping
+FM_BACKEND_ORCA_IDLE_RE='^(Type a message\.\.\.|Add a follow-up|Plan, search, build anything)$'  # orca-only: empty-composer placeholder regex after border/prompt stripping
+FM_BACKEND_ORCA_BARE_PROMPT_RE='^→( |$)'  # orca-only: Cursor Agent's → is the only glyph recognized as an UNBORDERED (bare) composer row; bare shell prompts - including a starship/pure-style ❯ - stay unknown
 FM_ZELLIJ_SESSION=firstmate  # zellij-only: named session for normal backend ops and test isolation (docs/zellij-backend.md)
 FM_BACKEND_CMUX_COMPOSER_LINES=20  # cmux-only: tail lines scanned to locate the composer row for submit verification
-FM_BACKEND_CMUX_IDLE_RE='^Type a message\.\.\.$'  # cmux-only: empty-composer placeholder regex after border/prompt stripping
+FM_BACKEND_CMUX_IDLE_RE='^(Type a message\.\.\.|Add a follow-up|Plan, search, build anything)$'  # cmux-only: empty-composer placeholder regex after border/prompt stripping
+FM_BACKEND_CMUX_BARE_PROMPT_RE='^→( |$)'  # cmux-only: Cursor Agent's → is the only glyph recognized as an UNBORDERED (bare) composer row; bare shell prompts - including a starship/pure-style ❯ - stay unknown
 CMUX_SOCKET_PASSWORD=   # cmux-only: socket password fallback when config/cmux-socket-password is absent (docs/cmux-backend.md)
 FM_SESSION_START_STATUS_TAIL=5   # state/*.status lines printed per task in the session-start digest
 FM_BOOTSTRAP_DETECT_ONLY=0   # internal/read-only session-start mode: skip bootstrap's mutating sweeps and print advisory TANGLE wording
@@ -431,8 +439,8 @@ FM_STALE_WORKTREE_LOCK_RETRY_WAIT_SECS=   # legacy alias for FM_TREEHOUSE_RETURN
 FM_FLEET_SYNC_PACKED_REFS_LOCK_RETRIES=3        # fetch retries after fm-fleet-sync.sh hits the orphaned .git/packed-refs.lock signature
 FM_FLEET_SYNC_PACKED_REFS_LOCK_RETRY_WAIT_SECS=1 # seconds fm-fleet-sync.sh waits before each of those retries
 FM_FLEET_SYNC_PACKED_REFS_LOCK_AGE_SECS=30       # min mtime age before fm-fleet-sync.sh treats a leftover packed-refs.lock as provably stale
-FM_BUSY_REGEX='esc (to )?interrupt|Working\.\.\.|Ctrl\+c:cancel'   # busy-pane signatures, shared by watcher, fm-crew-state pane fallback, and tmux helper
-FM_COMPOSER_IDLE_RE=    # optional empty-composer regex, applied after ghost and border stripping
+FM_BUSY_REGEX='esc (to )?interrupt|Working\.\.\.|Ctrl\+c:cancel|ctrl\+c to stop'   # busy-pane signatures, shared by watcher, fm-crew-state pane fallback, the tmux helper, and the orca/cmux/herdr composer classifiers' busy short-circuit
+FM_COMPOSER_IDLE_RE=    # optional empty-composer regex override, applied after ghost and border stripping; unset uses the shared placeholder set owned by bin/fm-composer-lib.sh (FM_COMPOSER_IDLE_REGEX_DEFAULT, aliased as FM_TMUX_IDLE_REGEX_DEFAULT)
 FM_COMPOSER_GHOST_LUMA_MAX=128   # fleet-wide: max perceived luminance (0.299R+0.587G+0.114B, 0-255) for a TRUECOLOR foreground to count as de-emphasised ghost/placeholder text and be stripped; dim/faint (SGR 2) is stripped regardless. Assumes a dark terminal theme (bin/fm-composer-lib.sh's fm_composer_strip_ghost, shared by the tmux and herdr composer readers)
 GROK_HOME=              # optional Grok config home for firstmate's global grok turn-end hook; defaults to ~/.grok
 FM_SEND_RETRIES=3       # fm-send Enter-retry attempts after typing the line once

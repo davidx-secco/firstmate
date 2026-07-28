@@ -49,8 +49,8 @@ The deeper tmux agent-liveness probe first verifies exact window membership, the
 It classifies recognized Claude, Codex, OpenCode, and Grok process names as `alive`, common shells as `dead`, an authoritatively absent window as `missing`, unreadable state as `unreadable`, and every other process as `ambiguous`.
 Only `dead` and `missing` authorize recovery because a false dead result could launch a duplicate agent.
 
-Pi runs through a generic `node` process name and cannot be attributed confidently from the tmux foreground-process field.
-An existing Pi pane is therefore reported as ambiguous rather than auto-healed, while an authoritatively missing Pi window can be relaunched safely.
+Pi and Cursor Agent both run through a generic `node` process name and cannot be attributed confidently from the tmux foreground-process field.
+Such a pane is therefore reported as ambiguous rather than auto-healed, while an authoritatively missing window of that harness can be relaunched safely.
 This is the active tmux liveness limitation.
 
 Agent liveness and composer safety are separate checks.

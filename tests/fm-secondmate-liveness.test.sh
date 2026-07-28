@@ -356,6 +356,35 @@ test_sweep_respawns_confirmed_dead_secondmate() {
   pass "sweep: a confirmed-dead secondmate endpoint is killed and respawned"
 }
 
+# An unattended respawn must never change the launch harness silently. When
+# config/crew-harness names a crewmate/scout-only adapter, bin/fm-harness.sh
+# substitutes a secondmate-capable one; the reason has to reach the captain on the
+# ORDINARY success path, not only under FM_BOOTSTRAP_VERBOSE_FACTS.
+test_sweep_reports_substituted_harness_on_crew_only_crew_harness() {
+  local w fb tmuxfb log out
+  w=$(new_world sweep-crew-only-substitution)
+  printf 'cursor\n' > "$w/home/config/crew-harness"
+  add_sm_home "$w" sm1 firstmate:fm-sm1
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+
+  out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" zsh "$log" CLAUDECODE=1)
+
+  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawned after confirmed agent absence on existing endpoint with a substituted harness:" \
+    "a harness substitution on the automatic respawn path must be reported without verbose diagnostics"
+  assert_contains "$out" "'cursor' is a crewmate/scout-only harness and cannot back a secondmate" \
+    "the reported fact must name the concrete reason for the substitution"
+  assert_contains "$out" "resolved to 'claude' instead" \
+    "the reported fact must name the harness the secondmate actually launched on"
+  assert_contains "$out" "pin config/secondmate-harness to override" \
+    "the reported fact must name the override"
+  assert_not_contains "$out" "crew-only-harness-skip" \
+    "the raw resolver marker must be consumed, not republished verbatim"
+  assert_contains "$(cat "$log")" "new-window" \
+    "the secondmate should still be relaunched on the substituted harness"
+  pass "sweep: a crew-only crew harness substitution is reported unconditionally on the successful respawn path"
+}
+
 test_sweep_leaves_alive_secondmate_untouched() {
   local w fb tmuxfb log out
   w=$(new_world sweep-alive)
@@ -435,6 +464,31 @@ test_sweep_reports_missing_endpoint_relaunch_failure() {
   pass "sweep: failed relaunch diagnostics distinguish a confidently missing endpoint"
 }
 
+# The crew-only substitution notice is written during harness resolution, ahead of
+# every other spawn stage, so it is always line 1 of the sweep's combined-output
+# capture. A respawn that fails for a genuinely later reason must still report THAT
+# reason, never the benign, already-handled substitution.
+test_sweep_failure_cause_excludes_substitution_notice() {
+  local w fb tmuxfb log out
+  w=$(new_world sweep-crew-only-failure)
+  printf 'cursor\n' > "$w/home/config/crew-harness"
+  add_sm_home "$w" sm1 firstmate:fm-sm1
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+
+  out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log" CLAUDECODE=1 FM_TEST_FAIL_NEW_WINDOW=1)
+
+  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing" \
+    "a failed relaunch under a crew-only crew harness should retain its authorizing cause"
+  assert_not_contains "$out" "crewmate/scout-only harness and cannot back a secondmate" \
+    "the failure cause must not be the informational harness-substitution notice"
+  assert_not_contains "$out" "crew-only-harness-skip" \
+    "the raw resolver marker must never reach a reported bootstrap fact"
+  assert_not_contains "$out" "with a substituted harness" \
+    "a failed respawn must not also claim a successful substituted-harness relaunch"
+  pass "sweep: a failed relaunch reports the genuine cause, not the harness-substitution notice"
+}
+
 test_sweep_never_acts_on_unverified_harness_dead_reading() {
   local w fb tmuxfb log out
   w=$(new_world sweep-unverified-harness)
@@ -512,11 +566,13 @@ test_tmux_agent_state_rejects_malformed_targets_before_probe
 test_herdr_agent_state_preserves_husk_classifier
 test_agent_state_dispatcher_and_compatibility
 test_sweep_respawns_confirmed_dead_secondmate
+test_sweep_reports_substituted_harness_on_crew_only_crew_harness
 test_sweep_leaves_alive_secondmate_untouched
 test_sweep_respawns_authoritatively_missing_pi_secondmate
 test_sweep_never_acts_on_ambiguous_existing_process
 test_sweep_never_acts_on_transient_unreadability
 test_sweep_reports_missing_endpoint_relaunch_failure
+test_sweep_failure_cause_excludes_substitution_notice
 test_sweep_never_acts_on_unverified_harness_dead_reading
 test_sweep_converges_no_retouch_once_alive
 test_sweep_skipped_under_detect_only

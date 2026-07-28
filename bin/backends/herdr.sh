@@ -1773,7 +1773,8 @@ fm_backend_herdr_strip_ansi() {  # <text>
 #              INTERIOR separator and does not start with one, so it never
 #              matches either.
 #   bare     - an UNBORDERED composer (verified real claude 2.x and codex
-#              0.142.x, both under herdr 0.7.1, docs/herdr-backend.md
+#              0.142.x under herdr 0.7.1, plus Cursor Agent's empirically
+#              verified `→` composer shape from its tmux TUI capture; docs/herdr-backend.md
 #              "Incident (2026-07-07)"): the row's TRIMMED content starts with
 #              one of the verified agent-specific prompt glyphs but carries no
 #              closing border at all - claude's own live input row is a bare
@@ -1803,8 +1804,11 @@ fm_backend_herdr_strip_ansi() {  # <text>
 #             ("Type a message...", verified grok 0.2.82's empty-composer
 #             placeholder), or only de-emphasised ANSI ghost/placeholder text
 #             recognized by the shared fm_composer_strip_ghost extractor
-#             (dim/faint or dark-TRUECOLOR foreground). Safe to treat as
-#             submitted.
+#             (dim/faint or dark-TRUECOLOR foreground), or a composer row
+#             carrying a busy stop hint (Cursor's on-row "ctrl+c to stop"
+#             while generating - a landed submit with a live turn, matched
+#             via FM_BUSY_REGEX / FM_BACKEND_HERDR_BUSY_REGEX_DEFAULT like
+#             the tmux/cmux/orca classifiers). Safe to treat as submitted.
 #   pending - real, unsubmitted text sits in the composer. This deliberately
 #             also covers a slash-command popup that just closed but only
 #             auto-completed or filled an argument-hint placeholder into the
@@ -1825,13 +1829,23 @@ fm_backend_herdr_strip_ansi() {  # <text>
 # that recognized only codex's bold-wrapped bare prompt and missed claude's own
 # dim ghost - the overnight away-mode injection wedge on the primary claude pane.
 FM_BACKEND_HERDR_COMPOSER_LINES=${FM_BACKEND_HERDR_COMPOSER_LINES:-20}
-# Known ghost/placeholder composer text. Extend this if another
-# herdr-verified harness needs its own idle placeholder recognized.
-FM_BACKEND_HERDR_IDLE_RE=${FM_BACKEND_HERDR_IDLE_RE:-'^Type a message\.\.\.$'}
+# Known ghost/placeholder composer text, from the shared composer owner
+# (FM_COMPOSER_IDLE_REGEX_DEFAULT, bin/fm-composer-lib.sh). Extend it THERE when
+# another verified harness needs its own idle placeholder recognized, so the set
+# cannot drift between the backends.
+FM_BACKEND_HERDR_IDLE_RE=${FM_BACKEND_HERDR_IDLE_RE:-$FM_COMPOSER_IDLE_REGEX_DEFAULT}
 # Known bare (unbordered) prompt glyphs a composer row may start with: ❯
-# (claude) and › (codex) only. Generic shell-style glyphs > $ % # are still
-# recognized after a bordered composer row has already been structurally found.
-FM_BACKEND_HERDR_BARE_PROMPT_RE=${FM_BACKEND_HERDR_BARE_PROMPT_RE:-'^[❯›]'}
+# (claude), › (codex), and → (Cursor Agent). Generic shell-style glyphs > $ % #
+# are still recognized after a bordered composer row has been structurally found.
+FM_BACKEND_HERDR_BARE_PROMPT_RE=${FM_BACKEND_HERDR_BARE_PROMPT_RE:-'^[❯›→]'}
+# Busy stop hints a harness may render on the composer row itself (Cursor
+# Agent's "ctrl+c to stop", verified 2026.07.20-8cc9c0b). A found composer row
+# matching this short-circuits to empty - the submit landed and a turn is
+# running - mirroring the tmux/cmux/orca classifiers, so the send-text-submit
+# composer fallback never re-sends Enter into a live turn. The signature set is
+# the shared one (FM_COMPOSER_BUSY_REGEX_DEFAULT, bin/fm-composer-lib.sh);
+# FM_BUSY_REGEX overrides, same as everywhere else.
+FM_BACKEND_HERDR_BUSY_REGEX_DEFAULT=$FM_COMPOSER_BUSY_REGEX_DEFAULT
 # Pi allows a multi-line composer between its horizontal separators. Bound the
 # structural candidate so two unrelated transcript rules with an arbitrarily
 # large region between them can never be promoted into a composer.
@@ -1993,9 +2007,20 @@ EOF
     # classification. ANSI stripping keeps real text and drops only styling.
     bordered=1
   fi
+  # A busy stop hint on the found composer row (Cursor renders "ctrl+c to
+  # stop" on the composer row itself while generating) is a landed submit with
+  # a live turn, not pending input - short-circuit to empty so the composer
+  # fallback in fm_backend_herdr_send_text_submit never re-sends Enter into a
+  # live turn. This matters on the plain-capture fallback, where no ANSI ghost
+  # stripping can drop the hint. A dead shell never renders a busy hint, so
+  # this cannot weaken the bare-shell refusal above.
+  if [ -n "$stripped" ] \
+     && printf '%s' "$stripped" | grep -qiE "${FM_BUSY_REGEX:-$FM_BACKEND_HERDR_BUSY_REGEX_DEFAULT}"; then
+    printf 'empty'; return 0
+  fi
   # Delegate the empty/pending/unknown decision to the shared owner. The bare
   # shape only ever starts with an AGENT glyph (FM_BACKEND_HERDR_BARE_PROMPT_RE
-  # is '^[❯›]'), so a bare shell prompt never reaches here - it stays 'unknown'
+  # is '^[❯›→]'), so a bare shell prompt never reaches here - it stays 'unknown'
   # via the no-composer-row path above, exactly as before.
   fm_composer_classify_content "$bordered" "$stripped" "$FM_BACKEND_HERDR_IDLE_RE"
 }

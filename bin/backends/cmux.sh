@@ -534,39 +534,54 @@ fm_backend_cmux_capture() {  # <target> <lines> [expected-label]
 # explicit direction - this is the highest-risk piece of a new backend's
 # send-and-verify logic, and cmux's `read-screen` gives plain-text capture
 # with no cursor-row primitive and no ANSI style channel like herdr's newer
-# `pane read --format ansi` path. The cmux classifier intentionally remains
-# border-row based: locate the
-# composer row as the only captured line whose TRIMMED content both STARTS and
-# ENDS with the same border glyph (│, ┃, or a plain ASCII |), scanning forward
-# and keeping the LAST match so an earlier border-shaped line (scrollback, a
-# popup) never outranks the real bottom-anchored composer row.
+# `pane read --format ansi` path. The cmux classifier recognizes either a row
+# enclosed by matching composer borders or a bare row beginning with Cursor
+# Agent's `→` glyph specifically (NOT the generic `❯`/`›` set - a dead shell
+# running a starship/pure-style `❯` prompt must stay unknown here), scanning
+# forward and keeping the LAST match so an earlier composer-shaped line in
+# scrollback never outranks the bottom-anchored composer. Cursor renders its
+# busy stop hint on the composer row itself, so a busy-regex match on the found
+# row short-circuits to empty (a landed submit), mirroring fm_tmux_composer_state.
 FM_BACKEND_CMUX_COMPOSER_LINES=${FM_BACKEND_CMUX_COMPOSER_LINES:-20}
-FM_BACKEND_CMUX_IDLE_RE=${FM_BACKEND_CMUX_IDLE_RE:-'^Type a message\.\.\.$'}
+# Idle placeholders and busy stop hints come from the shared composer owner
+# (FM_COMPOSER_{IDLE,BUSY}_REGEX_DEFAULT, bin/fm-composer-lib.sh) so a newly
+# verified harness's signature is added once fleet-wide, not once per backend.
+FM_BACKEND_CMUX_IDLE_RE=${FM_BACKEND_CMUX_IDLE_RE:-$FM_COMPOSER_IDLE_REGEX_DEFAULT}
+FM_BACKEND_CMUX_BARE_PROMPT_RE=${FM_BACKEND_CMUX_BARE_PROMPT_RE:-'^→( |$)'}
+FM_BACKEND_CMUX_BUSY_REGEX_DEFAULT=$FM_COMPOSER_BUSY_REGEX_DEFAULT
 
 fm_backend_cmux_composer_state() {  # <target> [expected-label] -> empty|pending|unknown
-  local target=$1 expected_label=${2:-} cap line trimmed stripped="" found=0
+  local target=$1 expected_label=${2:-} cap line trimmed stripped="" found=0 bordered=0
   cap=$(fm_backend_cmux_capture "$target" "$FM_BACKEND_CMUX_COMPOSER_LINES" "$expected_label") || { printf 'unknown'; return 0; }
   while IFS= read -r line; do
     trimmed="${line#"${line%%[![:space:]]*}"}"
     trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
     [ -n "$trimmed" ] || continue
     case "$trimmed" in
-      '│'*'│'|'┃'*'┃'|'|'*'|') : ;;
-      *) continue ;;
+      '│'*'│'|'┃'*'┃'|'|'*'|') bordered=1 ;;
+      *)
+        printf '%s' "$trimmed" | grep -qE "$FM_BACKEND_CMUX_BARE_PROMPT_RE" || continue
+        bordered=0
+        ;;
     esac
     stripped=$trimmed
     found=1
   done < <(printf '%s\n' "$cap")
   [ "$found" -eq 1 ] || { printf 'unknown'; return 0; }
-  stripped=${stripped//│/}
-  stripped=${stripped//┃/}
-  stripped=${stripped//|/}
+  if [ "$bordered" = 1 ]; then
+    stripped=${stripped//│/}
+    stripped=${stripped//┃/}
+    stripped=${stripped//|/}
+  fi
   stripped="${stripped#"${stripped%%[![:space:]]*}"}"
   stripped="${stripped%"${stripped##*[![:space:]]}"}"
-  # A row was found only by the bordered shape above, so content came from a
-  # genuine composer box - delegate to the shared owner with bordered=1. A bare
-  # dead-shell prompt has no bordered row and already returned 'unknown' above.
-  fm_composer_classify_content 1 "$stripped" "$FM_BACKEND_CMUX_IDLE_RE"
+  if [ -n "$stripped" ] \
+     && printf '%s' "$stripped" | grep -qiE "${FM_BUSY_REGEX:-$FM_BACKEND_CMUX_BUSY_REGEX_DEFAULT}"; then
+    printf 'empty'; return 0
+  fi
+  # A bare shape is accepted only for Cursor's own `→` glyph; a dead-shell
+  # prompt cannot reach the shared classifier as an empty composer.
+  fm_composer_classify_content "$bordered" "$stripped" "$FM_BACKEND_CMUX_IDLE_RE"
 }
 
 # fm_backend_cmux_send_text_submit: type <text> into <target> once (raw,

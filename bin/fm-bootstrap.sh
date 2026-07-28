@@ -409,6 +409,14 @@ secondmate_sync() {
   return 0
 }
 
+# The marker bin/fm-harness.sh puts ahead of its crew-only harness-substitution
+# notice. That notice is INFORMATIONAL and is written during harness resolution,
+# before every other spawn stage, so it is always the first line of the sweep's
+# combined-output capture. Both branches below key on this one marker: the success
+# branch lifts the reason out of it, and the failure branch excludes it so the
+# reported cause is the genuine error rather than an already-handled substitution.
+CREW_ONLY_SKIP_MARKER='crew-only-harness-skip: '
+
 secondmate_liveness_sweep() {
   # Idempotent secondmate liveness guarantee - SESSION START ONLY. The detailed
   # state machine and its only recovery-authorizing states are owned by
@@ -422,7 +430,7 @@ secondmate_liveness_sweep() {
   # primary-only no-op there. Mid-session liveness remains explicitly out of
   # scope and requires a separate periodic signal.
   [ -d "$STATE" ] || return 0
-  local meta id window harness backend target agent_state out cause
+  local meta id window harness backend target agent_state out cause harness_note spawn_err reason
   SECONDMATE_RESPAWNED_IDS=""
   for meta in "$STATE"/*.meta; do
     [ -f "$meta" ] || continue
@@ -456,11 +464,26 @@ secondmate_liveness_sweep() {
         fi
         if out=$(FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$id" --secondmate 2>&1); then
           SECONDMATE_RESPAWNED_IDS="$SECONDMATE_RESPAWNED_IDS $id"
+          # A successful respawn is normally silent, but bin/fm-harness.sh may have
+          # SUBSTITUTED the launch harness because config/crew-harness names a
+          # crewmate/scout-only adapter that cannot back a secondmate. That is a
+          # captain-relevant deviation from the configured harness, so lift the
+          # reason from the resolver's marked stderr line and report it as an
+          # actionable fact regardless of FM_BOOTSTRAP_VERBOSE_FACTS.
+          harness_note=$(printf '%s\n' "$out" | sed -n "s/.*$CREW_ONLY_SKIP_MARKER//p" | head -1)
+          if [ -n "$harness_note" ]; then
+            echo "SECONDMATE_LIVENESS: secondmate $id: respawned after $cause with a substituted harness: $harness_note (backend=$backend)"
+          fi
           if [ "${FM_BOOTSTRAP_VERBOSE_FACTS:-0}" = 1 ]; then
             echo "BOOTSTRAP_INFO: secondmate $id relaunched after $cause (backend=$backend)"
           fi
         else
-          echo "SECONDMATE_LIVENESS: secondmate $id: respawn failed after $cause: $(first_line "$out")"
+          spawn_err=$(printf '%s\n' "$out" \
+            | grep -v "$CREW_ONLY_SKIP_MARKER" \
+            | grep -v '^[[:space:]]*$' || true)
+          reason=$(first_line "$spawn_err")
+          [ -n "$reason" ] || reason="fm-spawn.sh exited non-zero with no error output"
+          echo "SECONDMATE_LIVENESS: secondmate $id: respawn failed after $cause: $reason"
         fi
         ;;
       ambiguous)
@@ -713,7 +736,7 @@ crew_dispatch_validate() {
     return 0
   fi
   err=$(jq -r '
-    def verified($h): ["claude","codex","opencode","pi","grok"] | index($h);
+    def verified($h): ["claude","codex","opencode","pi","grok","cursor"] | index($h);
     def effort_ok($h; $e):
       if $e == null then true
       elif ($e | type) != "string" then false
@@ -721,6 +744,7 @@ crew_dispatch_validate() {
       elif $h == "codex" then (["low","medium","high","xhigh"] | index($e))
       elif $h == "grok" then (["low","medium","high"] | index($e))
       elif $h == "pi" then (["low","medium","high","xhigh","max"] | index($e))
+      elif $h == "cursor" then (["low","medium","high","xhigh","max"] | index($e))
       elif $h == "opencode" then false
       else true
       end;

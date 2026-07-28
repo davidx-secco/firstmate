@@ -182,8 +182,9 @@ A human-blocked permission dialog has no busy banner and still surfaces.
 ## Composer and injection safety
 
 Herdr has no direct cursor-row primitive.
-The adapter locates the bottom-most recognized bordered row, Claude `❯` row, Codex `›` row, or a Pi separator region admitted only when native identity is exactly Pi and state is idle, done, or blocked.
+The adapter locates the bottom-most recognized bordered row, Claude `❯` row, Codex `›` row, Cursor Agent `→` row, or a Pi separator region admitted only when native identity is exactly Pi and state is idle, done, or blocked.
 A working Pi, pending middle row, missing identity, incomplete separator pair, or over-tall candidate remains pending or unknown.
+A busy stop hint rendered on the found composer row, such as Cursor's on-row `ctrl+c to stop`, is a landed submit with a live turn and reads `empty`, so the plain-capture fallback never re-sends Enter into a running turn.
 
 ANSI capture preserves de-emphasized placeholder style.
 `bin/fm-composer-lib.sh` is the fleet-wide owner that strips dim or faint runs and dark truecolor placeholders while retaining bright typed input.
