@@ -68,7 +68,9 @@
 # Each adapter keeps its own FM_* override variable name (FM_BUSY_REGEX,
 # FM_COMPOSER_IDLE_RE, FM_BACKEND_<NAME>_IDLE_RE, ...) and simply defaults to
 # these; the per-adapter names are the documented operator override surface.
+# shellcheck disable=SC2034 # Read by the adapters that source this lib (bin/fm-tmux-lib.sh, bin/backends/{herdr,orca,cmux}.sh, the watcher), not here.
 FM_COMPOSER_BUSY_REGEX_DEFAULT='esc (to )?interrupt|Working\.\.\.|Ctrl\+c:cancel|ctrl\+c to stop'
+# shellcheck disable=SC2034 # Read by the adapters that source this lib, not here.
 FM_COMPOSER_IDLE_REGEX_DEFAULT='^(Type a message\.\.\.|Add a follow-up|Plan, search, build anything)$'
 
 # fm_composer_strip_ansi: drop every CSI escape sequence, leaving plain text.
