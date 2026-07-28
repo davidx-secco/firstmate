@@ -670,7 +670,7 @@ families_for_changed_path() {
     bin/fm-x-*|bin/fm-check*)
       printf '%s\n' pr-forge
       ;;
-    bin/fm-gh-account.sh)
+    bin/fm-gh-account.sh|bin/fm-gh-shim.sh|bin/fm-install-gh-shim.sh)
       # Account selection is consumed at spawn and at every forge call.
       printf '%s\n' backend-dispatch
       printf '%s\n' pr-forge

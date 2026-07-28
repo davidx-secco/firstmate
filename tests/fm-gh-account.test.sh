@@ -84,6 +84,13 @@ if [ "${1:-}" = api ]; then
   printf 'gh: Not Found (HTTP 404)\n' >&2
   exit 1
 fi
+# Any other command stands in for real work, and records the identity it ran as
+# so a wrapper's pass-through and injection are both observable.
+case "${GH_TOKEN:-}" in
+  ghtoken-*) printf 'AS %s\n' "${GH_TOKEN#ghtoken-}" >> "$log" ;;
+  '') printf 'AS active\n' >> "$log" ;;
+  *) printf 'AS unusable\n' >> "$log" ;;
+esac
 exit 0
 SH
   chmod +x "$fakebin/gh"
@@ -463,6 +470,196 @@ test_spawn_refuses_an_undeterminable_account() {
   pass "a spawn with no determinable account stops at dispatch with the reason and its fix"
 }
 
+# --- the gh wrapper --------------------------------------------------------
+#
+# The wrapper exists for calls this repo does not launch, above all no-mistakes'
+# shared daemon. It shadows gh for everything on the machine, so the assertions
+# below are as much about what it leaves alone as about what it corrects.
+
+SHIM="$ROOT/bin/fm-gh-shim.sh"
+INSTALLER="$ROOT/bin/fm-install-gh-shim.sh"
+
+# run_shim <accounts> <access> <cwd> <args...>
+run_shim() {
+  local accounts=$1 access=$2 cwd=$3
+  shift 3
+  ( cd "$cwd" && FM_CONFIG_OVERRIDE="$CASE_DIR/config" \
+      FM_GH_REAL="$FAKEBIN/gh" FM_GH_ACCOUNT_BIN="$GHA" \
+      FM_FAKE_GH_ACCOUNTS="$accounts" FM_FAKE_GH_ACCESS="$access" \
+      FM_FAKE_GH_LOG="$LOG" \
+      PATH="$FAKEBIN:$PATH" \
+      "$SHIM" "$@" 2>&1 )
+}
+
+assert_ran_as() {  # <login|active> <label>
+  assert_grep "AS $1" "$LOG" "$2: the wrapper did not run gh as $1"
+}
+
+# Every command whose subject is the account, the local install, or help must
+# reach gh exactly as it always did - manual "gh auth" work depends on it.
+test_shim_leaves_gh_alone_where_it_must() {
+  local rec out
+  rec=$(new_case shim-passthrough git@github.com:BG-Media-LLC/vsl-funnel.git)
+  read_case "$rec"
+  while IFS='|' read -r label args; do
+    [ -n "$label" ] || continue
+    : > "$LOG"
+    # shellcheck disable=SC2086  # args is an intentional word-split arg list
+    out=$(run_shim 'daveonthegit davidx-secco' 'davidx-secco=50' "$REPO_DIR" $args)
+    expect_code 0 "$?" "$label: should pass through cleanly"
+    assert_no_grep 'AS davidx-secco' "$LOG" "$label: the wrapper injected an account it should not have"
+    assert_no_grep 'gh api repos' "$LOG" "$label: the wrapper resolved an account it should not have"
+    assert_not_contains "$out" ghtoken "$label: a credential reached the output"
+  done <<'ROWS'
+auth status|auth status
+config get|config get git_protocol
+gh with no arguments|
+help flag on a repository command|pr list --help
+version flag|--version
+another host by flag|pr list --hostname git.example.com
+bare repository name|pr list --repo justaname
+ROWS
+  : > "$LOG"
+  out=$(GH_HOST=git.example.com run_shim 'daveonthegit davidx-secco' 'davidx-secco=50' "$REPO_DIR" pr list)
+  expect_code 0 "$?" "GH_HOST elsewhere: should pass through"
+  assert_no_grep 'AS davidx-secco' "$LOG" "GH_HOST elsewhere: the wrapper still injected an account"
+
+  # "gh auth token" prints a credential by design, so it is asserted on its own:
+  # it must reach gh untouched, which is also what keeps account resolution from
+  # re-entering this wrapper.
+  : > "$LOG"
+  out=$(run_shim 'daveonthegit davidx-secco' 'davidx-secco=50' "$REPO_DIR" auth token --user daveonthegit)
+  expect_code 0 "$?" "auth token: should pass through"
+  [ "$out" = ghtoken-daveonthegit ] || fail "auth token did not reach gh untouched: $out"
+  assert_no_grep 'gh api repos' "$LOG" "auth token triggered account resolution"
+  pass "the wrapper passes account, config, help, and other-host commands straight to gh"
+}
+
+# An explicit credential always wins, which is also what keeps the account
+# probes from re-entering the wrapper.
+test_shim_never_overrides_an_explicit_credential() {
+  local rec
+  rec=$(new_case shim-explicit-token git@github.com:BG-Media-LLC/vsl-funnel.git)
+  read_case "$rec"
+  GH_TOKEN=ghtoken-daveonthegit run_shim 'daveonthegit davidx-secco' 'davidx-secco=50' "$REPO_DIR" \
+    pr list >/dev/null
+  expect_code 0 "$?" "an explicit credential should pass through"
+  assert_ran_as daveonthegit "explicit credential"
+  assert_no_grep 'gh api repos' "$LOG" "the wrapper resolved despite an explicit credential"
+  pass "a call that already carries a credential is never re-pointed at another account"
+}
+
+# The correction itself, from both sides, plus an explicit --repo outranking the
+# directory the call happens to run in.
+test_shim_runs_repository_work_as_its_own_account() {
+  local rec
+  rec=$(new_case shim-org git@github.com:BG-Media-LLC/vsl-funnel.git)
+  read_case "$rec"
+  run_shim 'daveonthegit davidx-secco' 'davidx-secco=50' "$REPO_DIR" pr list >/dev/null
+  expect_code 0 "$?" "org repository work should run"
+  assert_ran_as davidx-secco "org repository"
+
+  : > "$LOG"
+  run_shim 'daveonthegit davidx-secco' 'daveonthegit=50 davidx-secco=10' "$REPO_DIR" \
+    pr list --repo daveonthegit/Kyarafit >/dev/null
+  expect_code 0 "$?" "explicit repository work should run"
+  assert_ran_as daveonthegit "explicit --repo"
+
+  : > "$LOG"
+  rec=$(new_case shim-gitlab git@gitlab.com:BG-Media-LLC/vsl-funnel.git)
+  read_case "$rec"
+  run_shim 'daveonthegit davidx-secco' 'davidx-secco=50' "$REPO_DIR" pr list >/dev/null
+  assert_ran_as active "another forge"
+
+  : > "$LOG"
+  run_shim 'davidx-secco' 'davidx-secco=50' "$REPO_DIR" pr list >/dev/null
+  assert_ran_as active "single account"
+  assert_no_violations "wrapper"
+  pass "repository work runs as that repository's own account; nothing to choose leaves gh alone"
+}
+
+# Refusals: an undeterminable account, and a helper this repo can no longer
+# reach while more than one account is logged in.
+test_shim_refuses_rather_than_guessing() {
+  local rec out status
+  rec=$(new_case shim-refuse git@github.com:BG-Media-LLC/vsl-funnel.git)
+  read_case "$rec"
+  out=$(run_shim 'daveonthegit davidx-secco' '' "$REPO_DIR" pr list)
+  status=$?
+  [ "$status" -ne 0 ] || fail "the wrapper ran gh without knowing which account to use"
+  assert_no_grep 'AS ' "$LOG" "the wrapper ran gh anyway"
+  assert_contains "$out" "not running gh as an unintended account" "refusal is not stated"
+  assert_contains "$out" "remove this wrapper" "refusal does not say how to undo the wrapper"
+
+  : > "$LOG"
+  out=$( cd "$REPO_DIR" && FM_GH_REAL="$FAKEBIN/gh" FM_GH_ACCOUNT_BIN="$CASE_DIR/gone.sh" \
+    FM_FAKE_GH_ACCOUNTS='daveonthegit davidx-secco' FM_FAKE_GH_LOG="$LOG" \
+    PATH="$FAKEBIN:$PATH" "$SHIM" pr list 2>&1 )
+  status=$?
+  [ "$status" -ne 0 ] || fail "an unreachable helper with two accounts should refuse"
+  assert_contains "$out" "unreachable" "unreachable-helper refusal is not explained"
+  assert_no_grep 'AS ' "$LOG" "the wrapper ran gh with no way to choose an account"
+
+  : > "$LOG"
+  out=$( cd "$REPO_DIR" && FM_GH_REAL="$FAKEBIN/gh" FM_GH_ACCOUNT_BIN="$CASE_DIR/gone.sh" \
+    FM_FAKE_GH_ACCOUNTS='davidx-secco' FM_FAKE_GH_LOG="$LOG" \
+    PATH="$FAKEBIN:$PATH" "$SHIM" pr list 2>&1 )
+  expect_code 0 "$?" "an unreachable helper with one account should pass through: $out"
+  assert_ran_as active "unreachable helper, one account"
+  pass "an undeterminable account is refused, and an unreachable helper refuses only when a wrong account is possible"
+}
+
+# Installing is reversible and never touches a gh this repo did not write.
+test_installer_is_reversible_and_careful() {
+  local rec target out installed status
+  rec=$(new_case installer git@github.com:BG-Media-LLC/vsl-funnel.git)
+  read_case "$rec"
+  target="$CASE_DIR/bin"
+
+  out=$(PATH="$FAKEBIN:$PATH" FM_GH_SHIM_ALLOW_LINKED_WORKTREE=1 "$INSTALLER" --target "$target" 2>&1)
+  expect_code 0 "$?" "install failed: $out"
+  installed="$target/gh"
+  assert_present "$installed" "the wrapper was not installed"
+  [ -x "$installed" ] || fail "the installed wrapper is not executable"
+  assert_grep 'fm-gh-shim: installed by' "$installed" "the installed wrapper carries no marker"
+  assert_no_grep '__FM_GH_ACCOUNT_BIN__' "$installed" "the installed wrapper kept its placeholder"
+  assert_grep "$ROOT/bin/fm-gh-account.sh" "$installed" "the installed wrapper does not point at the helper"
+
+  # Reinstalling refreshes in place, and the copy stays the tracked wrapper apart
+  # from that one substituted line.
+  out=$(PATH="$FAKEBIN:$PATH" FM_GH_SHIM_ALLOW_LINKED_WORKTREE=1 "$INSTALLER" --target "$target" 2>&1)
+  expect_code 0 "$?" "reinstall failed: $out"
+  [ "$(diff "$SHIM" "$installed" | grep -c '^[<>]')" -eq 2 ] \
+    || fail "the installed wrapper differs from the tracked one beyond the substituted path"
+
+  out=$(PATH="$FAKEBIN:$PATH" FM_GH_SHIM_ALLOW_LINKED_WORKTREE=1 "$INSTALLER" --check --target "$target" 2>&1)
+  assert_contains "$out" "installed: $installed" "--check does not report the install"
+
+  # A machine-wide wrapper must not record a path that disappears with a task
+  # worktree, so installing from one is refused on its own.
+  out=$(PATH="$FAKEBIN:$PATH" FM_ROOT_OVERRIDE="$CASE_DIR/not-a-checkout" "$INSTALLER" --target "$target" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "install accepted a root that will not outlive it"
+  assert_contains "$out" "not a durable checkout" "the durable-checkout refusal is not explained"
+
+  out=$(PATH="$FAKEBIN:$PATH" FM_GH_SHIM_ALLOW_LINKED_WORKTREE=1 "$INSTALLER" --uninstall --target "$target" 2>&1)
+  expect_code 0 "$?" "uninstall failed: $out"
+  assert_absent "$installed" "uninstall left the wrapper behind"
+
+  # A gh this repo did not write is never replaced or removed.
+  printf '#!/bin/sh\nexit 0\n' > "$installed"
+  chmod +x "$installed"
+  out=$(PATH="$FAKEBIN:$PATH" FM_GH_SHIM_ALLOW_LINKED_WORKTREE=1 "$INSTALLER" --target "$target" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "install replaced a gh it did not write"
+  assert_contains "$out" "not written by this repo" "install refusal is not explained"
+  out=$(PATH="$FAKEBIN:$PATH" FM_GH_SHIM_ALLOW_LINKED_WORKTREE=1 "$INSTALLER" --uninstall --target "$target" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "uninstall removed a gh it did not write"
+  assert_present "$installed" "uninstall deleted a foreign gh"
+  pass "installing is idempotent and reversible, and a foreign gh is never replaced or removed"
+}
+
 test_both_accounts_resolve_from_the_repository
 test_origin_forms_and_other_forges
 test_nothing_to_choose_leaves_gh_alone
@@ -474,5 +671,10 @@ test_env_snippet_fails_closed_in_the_shell
 test_spawn_hands_the_lane_its_own_account
 test_spawn_without_a_choice_is_unchanged
 test_spawn_refuses_an_undeterminable_account
+test_shim_leaves_gh_alone_where_it_must
+test_shim_never_overrides_an_explicit_credential
+test_shim_runs_repository_work_as_its_own_account
+test_shim_refuses_rather_than_guessing
+test_installer_is_reversible_and_careful
 
 echo "# all fm-gh-account tests passed"

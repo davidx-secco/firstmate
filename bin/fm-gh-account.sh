@@ -426,7 +426,10 @@ case "$MODE" in
       warn "no usable github.com token for $LOGIN; re-authenticate it with 'gh auth login'"
       exit 1
     fi
-    exec env -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN \
-      GH_TOKEN="$TOKEN" "${CMD[@]}"
+    # Exported from this shell rather than passed through env's argument list,
+    # which any process listing would show while env is still running.
+    export GH_TOKEN="$TOKEN"
+    unset GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN
+    exec "${CMD[@]}"
     ;;
 esac

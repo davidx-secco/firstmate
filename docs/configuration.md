@@ -268,8 +268,15 @@ Secondmate homes inherit this file from the primary, so the whole fleet resolves
 `bin/fm-spawn.sh` resolves the account before it creates anything, records it as `gh_account=` in the task metadata, and exports the credential into the worker's own shell, so every forge call in that lane inherits the right identity.
 A spawn whose account cannot be determined stops at dispatch with the reason and its fix, because an undetermined identity surfaces otherwise as an unexplained "could not resolve to a Repository" error deep inside a pipeline.
 
-This selection reaches every call firstmate or a worker makes itself, which covers the direct-PR path end to end.
-It does not reach the forge calls no-mistakes makes from its own shared daemon, because that daemon's environment is fixed when it starts and one credential there could not serve more than one account; those calls still use whichever account is globally active.
+Exporting a credential per lane reaches every call firstmate or a worker makes itself, which covers the direct-PR path end to end.
+It cannot reach the forge calls no-mistakes makes from its own shared daemon, whose environment is fixed when it starts and where one credential could not serve more than one account.
+`bin/fm-install-gh-shim.sh` closes that gap by installing `bin/fm-gh-shim.sh` as a `gh` in a directory that precedes the real `gh` on those processes' PATH, so they enter it at exec time with no daemon restart and no change to any `gh` account state.
+The wrapper's own header owns exactly which commands it touches; the short version is that it corrects a command acting on a repository it can identify and passes everything else through untouched, including all of `gh auth`, help and version output, other hosts, and every case where no selection applies.
+When it cannot determine the account for a repository it refuses loudly instead of running as an unintended one.
+
+Installing it shadows `gh` for every process whose PATH reaches the target directory first, including manual use, which is the cost of correcting processes this repo does not launch.
+`--check` reports what is installed, `--uninstall` removes it, and neither ever replaces or deletes a `gh` this repo did not write.
+Recording an owner in `config/gh-accounts` keeps the wrapper's selection offline and instant; an owner that must be derived by probing costs one API call per `gh` invocation.
 
 ## Toolchain
 

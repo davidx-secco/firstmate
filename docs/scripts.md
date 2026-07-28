@@ -87,6 +87,8 @@ The shared no-mistakes gate refusal for fleet lifecycle entrypoints is summarize
 | `fm-teardown.sh`         | Fail-closed teardown: return landed ship worktrees, require completed scout deliverables, retire secondmate homes |
 | `fm-harness.sh`          | Detect the running harness and resolve crew or secondmate harness, model, and effort |
 | `fm-gh-account.sh`       | Choose the GitHub account a repository needs and lend its credential to one child process, never to global `gh` state |
+| `fm-gh-shim.sh`          | A `gh` that runs repository work as that repository's own account, and passes every other command straight through |
+| `fm-install-gh-shim.sh`  | Install, inspect, or remove that `gh` wrapper for processes this repo does not launch |
 | `fm-lock.sh`             | Per-home firstmate session lock                                                      |
 | `fm-x-lib.sh`            | Shared X-mode config, relay, and reply-threading helpers                             |
 | `fm-x-poll.sh`           | One bounded X relay poll: stash newly offered mentions and emit their once-only wake |
