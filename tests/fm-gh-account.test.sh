@@ -54,9 +54,14 @@ case "${1:-} ${2:-}" in
       exit 0
     fi
     # A home logged in to a GitHub Enterprise host only: gh exits 0, and there is
-    # no github.com account anywhere in the output to get wrong.
-    if [ "${FM_FAKE_GH_ENTERPRISE_ONLY:-0}" = 1 ]; then
-      printf 'git.example.com\n  x Logged in to git.example.com account someone (keyring)\n'
+    # no github.com account anywhere in the output to get wrong. The value names
+    # the host, so a hostname that merely contains "github.com" is covered too,
+    # and gh's own documentation hint is printed alongside it.
+    if [ "${FM_FAKE_GH_ENTERPRISE_ONLY:-0}" != 0 ]; then
+      ghe_host=$FM_FAKE_GH_ENTERPRISE_ONLY
+      [ "$ghe_host" = 1 ] && ghe_host=git.example.com
+      printf '%s\n  x Logged in to %s account someone (keyring)\n' "$ghe_host" "$ghe_host"
+      printf '  - See https://docs.github.com/en/authentication for details\n'
       exit 0
     fi
     # Real gh exits non-zero when nobody is logged in anywhere, which is what
@@ -288,15 +293,19 @@ test_unparseable_auth_status_refuses() {
 # get wrong, so it must keep behaving exactly as it did before this selection
 # existed rather than being refused.
 test_enterprise_only_home_is_untouched() {
-  local rec out
-  rec=$(new_case enterprise-only git@github.com:BG-Media-LLC/vsl-funnel.git)
-  read_case "$rec"
-  out=$(FM_FAKE_GH_ENTERPRISE_ONLY=1 run_gha 'daveonthegit davidx-secco' 'davidx-secco=50' \
-    resolve --dir "$REPO_DIR")
-  expect_code 3 "$?" "an enterprise-only home should select nothing (output: $out)"
-  [ -z "$out" ] || fail "an enterprise-only home produced output: $out"
-  assert_no_probe "enterprise-only home"
-  pass "a home logged in to another host only is left exactly as it was"
+  local rec out host
+  # The second host merely contains "github.com" in its name, and both outputs
+  # carry a docs.github.com hint: neither is github.com being authenticated.
+  for host in 1 github.company.com; do
+    rec=$(new_case "enterprise-only-$host" git@github.com:BG-Media-LLC/vsl-funnel.git)
+    read_case "$rec"
+    out=$(FM_FAKE_GH_ENTERPRISE_ONLY="$host" run_gha 'daveonthegit davidx-secco' 'davidx-secco=50' \
+      resolve --dir "$REPO_DIR")
+    expect_code 3 "$?" "$host: an enterprise-only home should select nothing (output: $out)"
+    [ -z "$out" ] || fail "$host: an enterprise-only home produced output: $out"
+    assert_no_probe "enterprise-only home $host"
+  done
+  pass "a home logged in to another host only is left exactly as it was, whatever that host is called"
 }
 
 # Nothing to choose between: gh missing, nobody logged in, or a single account.

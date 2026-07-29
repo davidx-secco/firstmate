@@ -107,11 +107,11 @@ gh_as() {  # <token> <gh-arg>...
 ACCOUNTS=
 ACCOUNTS_LOADED=0
 # Exit status of the "gh auth status" the list was read from, and whether that
-# output mentioned github.com at all. gh exits 0 when any host is authenticated,
-# including a GitHub Enterprise host alone, so only these two together separate
-# "github.com is authenticated in wording this script cannot read" from the two
-# cases that genuinely have nothing to select: nobody logged in anywhere, and a
-# home logged in to another host only.
+# output names github.com as a host of its own. gh exits 0 when any host is
+# authenticated, including a GitHub Enterprise host alone, so only these two
+# together separate "github.com is authenticated in wording this script cannot
+# read" from the two cases that genuinely have nothing to select: nobody logged in
+# anywhere, and a home logged in to another host only.
 ACCOUNTS_STATUS=1
 ACCOUNTS_SAW_GITHUB_COM=0
 
@@ -131,9 +131,13 @@ load_accounts() {
   fi
   ACCOUNTS=$(printf '%s\n' "$out" \
     | sed -n 's/.*Logged in to github\.com account \([A-Za-z0-9][A-Za-z0-9-]*\).*/\1/p')
-  case "$out" in
-    *github.com*) ACCOUNTS_SAW_GITHUB_COM=1 ;;
-  esac
+  # gh's own host-section line, or a login line naming that exact host. Both are
+  # anchored so a host whose name merely contains the string, such as
+  # github.company.com, and any docs.github.com URL in a hint, do not count.
+  if printf '%s\n' "$out" | grep -Eq \
+    '^[[:space:]]*github\.com[[:space:]]*$|Logged in to github\.com([^A-Za-z0-9.-]|$)'; then
+    ACCOUNTS_SAW_GITHUB_COM=1
+  fi
 }
 
 # True only when gh reports github.com as authenticated in wording no login could
