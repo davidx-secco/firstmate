@@ -76,7 +76,7 @@ All supported runtime backend integration surfaces were reviewed before enabling
 
 Cursor is refused for secondmate launches.
 This avoids claiming primary session-start, turn-end, watcher, and process-liveness guarantees that have not been empirically verified.
-The existing six primary harness integrations in `docs/sessionstart-nudge.md`, `docs/turnend-guard.md`, `docs/arm-pretool-check.md`, and `docs/supervision-protocols/` remain unchanged.
+The existing primary harness integrations in `docs/sessionstart-nudge.md`, `docs/turnend-guard.md`, `docs/arm-pretool-check.md`, and `docs/supervision-protocols/` remain unchanged; those documents own that set.
 
 ## Empirical verification
 

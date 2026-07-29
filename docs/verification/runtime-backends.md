@@ -416,4 +416,4 @@ App-server partial methods and raw socket experiments do not satisfy that bridge
 
 Cursor Agent is a crewmate/scout-only harness that runs on top of the runtime backends above rather than being a backend itself.
 Its launch, model mapping, composer-classification, and process-liveness evidence, verified on 2026-07-23 against Cursor Agent `2026.07.20-8cc9c0b`, are recorded in full in [`../cursor-agent-harness.md`](../cursor-agent-harness.md).
-The cross-backend review confirming each backend's shared busy regex and composer classifier handle Cursor's `→` idle glyph and on-row `ctrl+c to stop` busy hint lives in the same record.
+The cross-backend review confirming each backend's busy matcher and composer classifier handle Cursor's `→` idle glyph and on-row `ctrl+c to stop` busy hint lives in the same record; tmux reaches that hint through its harness-scoped Cursor signature, while the other adapters reach it through the shared unscoped set.
