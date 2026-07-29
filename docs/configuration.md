@@ -280,6 +280,7 @@ What decides that is whether `gh` resolves to the wrapper at all, not whether a 
 
 Installing it shadows `gh` for every process whose PATH reaches the target directory first, including manual use, which is the cost of correcting processes this repo does not launch.
 `--check` reports what is installed and whether the wrapper is in effect for the PATH it runs with, `--uninstall` removes it, and neither ever replaces or deletes a `gh` this repo did not write.
+Install it from a durable checkout, which for firstmate means the primary home: the installed copy records the absolute path of the account helper it calls, so installing from a linked task worktree is refused unless `FM_GH_SHIM_ALLOW_LINKED_WORKTREE=1` deliberately accepts that the copy stops resolving repositories when the worktree goes away.
 Recording an owner in `config/gh-accounts` keeps the wrapper's selection offline and instant; an owner that must be derived by probing costs one API call per `gh` invocation.
 
 ## Toolchain
@@ -439,6 +440,7 @@ FM_CREW_STATE_RUNS_LIMIT=200  # recent no-mistakes run rows scanned when axi sta
 FM_CREW_STATE_BIN=bin/fm-crew-state.sh   # test override for the current-state reader used by working/paused watcher triage
 FM_GH_ACCOUNT=          # one-invocation GitHub account override; "none" selects no account at all
 FM_GH_ACCOUNT_TIMEOUT=10   # seconds allowed per repository-visibility probe when a timeout command is available
+FM_GH_SHIM_ALLOW_LINKED_WORKTREE=0   # warned override that installs the gh wrapper from a linked task worktree; the install must be re-run from a durable checkout before that copy goes away
 FMX_PAIRING_TOKEN=      # X mode pairing token; .env opt-in authorizes replies and eligible lifecycle actions
 FMX_RELAY_URL=https://myfirstmate.io   # optional X relay override, mainly for local relay development
 FMX_ENV_FILE=           # optional alternate .env file for direct X client invocations; bootstrap still checks $FM_HOME/.env
