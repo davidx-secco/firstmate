@@ -22,10 +22,19 @@
 #     codespace, gist, ssh-key, and gpg-key, whose subject is the account or the
 #     local install rather than a repository - manual "gh auth" work in
 #     particular must keep behaving exactly as it always did
-#   - any invocation asking for help or a version, and a bare "gh"
+#   - any invocation asking for help or a version, and a bare "gh"; a -h, -v, -V,
+#     --help, or --version standing where another flag's value goes, or after a
+#     "--", is a value rather than such a request
 #   - a host other than github.com, from --hostname or GH_HOST
 #   - a --repo naming a bare repository name, which only gh's own active account
 #     can expand
+#
+# Keyed off the repository the call names rather than the directory it runs in:
+#   - --repo/-R in all of gh's own forms, including "-Rowner/repo"
+#   - an "api" endpoint whose path is repos/{owner}/{repo}/..., with or without a
+#     leading slash or an https://api.github.com prefix; every other endpoint,
+#     including one holding gh's own {owner}/{repo} placeholders, stays keyed off
+#     the working directory
 #   - anything at all when no account selection applies: not a github.com
 #     checkout, one account logged in, nobody logged in (fm-gh-account.sh's
 #     "nothing to select" exit)
@@ -101,11 +110,25 @@ case "${1:-}" in
     ;;
 esac
 
-# Help and version output must be byte-identical to gh's own.
+# Help and version output must be byte-identical to gh's own. Only a flag that is
+# not standing where another flag's value goes counts as such a request, and
+# nothing after "--" does: "gh pr comment --body -v" asks for no help, and
+# passing it through unkeyed would run it as whichever account is active.
+# Anything this misreads as repository work is still keyed rather than guessed,
+# and gh's own help output does not depend on which account it runs as.
+PREV=
 for arg in "$@"; do
+  [ "$arg" = -- ] && break
+  case "$PREV" in
+    # A value attached with "=" leaves the next argument free to be a flag.
+    -*=*) ;;
+    # Otherwise this argument may be the previous flag's value.
+    -?*) PREV=$arg; continue ;;
+  esac
   case "$arg" in
     -h|--help|-v|-V|--version) exec "$REAL" "$@" ;;
   esac
+  PREV=$arg
 done
 
 REPO_ARG=
@@ -119,10 +142,54 @@ for arg in "$@"; do
   case "$arg" in
     --repo=*) REPO_ARG=${arg#--repo=} ;;
     -R=*) REPO_ARG=${arg#-R=} ;;
+    # pflag accepts a shorthand's value attached to it, so "-Rowner/repo" names a
+    # repository exactly as "-R owner/repo" does.
+    -R?*) REPO_ARG=${arg#-R} ;;
     --hostname=*) HOST_ARG=${arg#--hostname=} ;;
   esac
   PREV=$arg
 done
+
+# "gh api" carries its repository in the endpoint path instead of --repo, so a
+# "repos/{owner}/{repo}/..." endpoint names the repository just as explicitly.
+# gh's own "{owner}" and "{repo}" placeholders are expanded from the working
+# directory, so a path holding them is left keyed off that directory, as is every
+# endpoint that names no repository at all.
+api_repo_from_endpoint() {  # <endpoint>
+  local path=$1 owner repo rest
+  case "$path" in
+    https://api.github.com/*) path=${path#https://api.github.com/} ;;
+    http://api.github.com/*) path=${path#http://api.github.com/} ;;
+    *://*) return 1 ;;
+  esac
+  path=${path#/}
+  case "$path" in
+    repos/*) path=${path#repos/} ;;
+    *) return 1 ;;
+  esac
+  case "$path" in
+    */*) owner=${path%%/*}; rest=${path#*/} ;;
+    *) return 1 ;;
+  esac
+  repo=${rest%%/*}
+  [ -n "$owner" ] && [ -n "$repo" ] || return 1
+  case "$owner$repo" in
+    *'{'*|*'}'*) return 1 ;;
+  esac
+  printf '%s/%s\n' "$owner" "$repo"
+}
+
+if [ -z "$REPO_ARG" ] && [ "${1:-}" = api ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      -*) continue ;;
+    esac
+    if api_spec=$(api_repo_from_endpoint "$arg"); then
+      REPO_ARG=$api_spec
+      break
+    fi
+  done
+fi
 
 # A host other than github.com is outside this selection entirely.
 case "$HOST_ARG" in

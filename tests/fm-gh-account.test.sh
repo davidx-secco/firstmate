@@ -47,6 +47,19 @@ case "${1:-} ${2:-}" in
     # GH_TOKEN would otherwise decide which accounts are visible.
     [ -z "${GH_TOKEN:-}" ] || printf 'VIOLATION token-visible-to-auth-status\n' >> "$log"
     [ -z "${GITHUB_TOKEN:-}" ] || printf 'VIOLATION github-token-visible-to-auth-status\n' >> "$log"
+    # A gh that reports a logged-in account in wording this repo cannot parse:
+    # a different locale, an older gh, or a future rewording.
+    if [ "${FM_FAKE_GH_STATUS_UNPARSEABLE:-0}" = 1 ]; then
+      printf 'github.com\n  x Angemeldet bei github.com als daveonthegit (keyring)\n'
+      exit 0
+    fi
+    # Real gh exits non-zero when nobody is logged in anywhere, which is what
+    # tells this repo that an empty list means "nothing to select" rather than
+    # "output this repo could not read".
+    if [ -z "${FM_FAKE_GH_ACCOUNTS:-}" ]; then
+      printf 'You are not logged into any GitHub hosts. To log in, run: gh auth login\n' >&2
+      exit 1
+    fi
     printf 'github.com\n'
     for a in ${FM_FAKE_GH_ACCOUNTS:-}; do
       printf '  x Logged in to github.com account %s (keyring)\n' "$a"
@@ -190,6 +203,7 @@ https|https://github.com/BG-Media-LLC/vsl-funnel.git|davidx-secco
 https-no-suffix|https://github.com/BG-Media-LLC/vsl-funnel|davidx-secco
 ssh-url|ssh://git@github.com/BG-Media-LLC/vsl-funnel.git|davidx-secco
 ssh-url-port|ssh://git@github.com:22/BG-Media-LLC/vsl-funnel.git|davidx-secco
+https-port|https://github.com:443/BG-Media-LLC/vsl-funnel.git|davidx-secco
 gitlab|git@gitlab.com:BG-Media-LLC/vsl-funnel.git|3
 self-hosted|https://git.example.com/BG-Media-LLC/vsl-funnel.git|3
 ROWS
@@ -198,6 +212,50 @@ ROWS
   out=$(run_gha 'daveonthegit davidx-secco' 'davidx-secco=50' resolve --dir "$REPO_DIR")
   expect_code 3 "$?" "a checkout with no origin should select nothing"
   pass "every github.com origin form resolves alike; other forges and originless checkouts select nothing"
+}
+
+# A GitHub login may be all digits, and an owner that looks like an ssh port must
+# still reach the probe as the owner rather than being dropped as one.
+test_numeric_owner_is_not_mistaken_for_a_port() {
+  local rec out status
+  while IFS='|' read -r name origin; do
+    [ -n "$name" ] || continue
+    rec=$(new_case "numeric-$name" "$origin")
+    read_case "$rec"
+    out=$(run_gha 'daveonthegit davidx-secco' 'davidx-secco=50' resolve --dir "$REPO_DIR")
+    status=$?
+    expect_code 0 "$status" "$name: a numeric owner should resolve like any other"
+    [ "$out" = davidx-secco ] || fail "$name: resolved to '$out', wanted davidx-secco"
+    assert_grep 'gh api repos/12345/vsl-funnel' "$LOG" \
+      "$name: the probe did not ask about the repository the origin names"
+  done <<'ROWS'
+https|https://github.com/12345/vsl-funnel.git
+scp|git@github.com:12345/vsl-funnel.git
+ssh-url|ssh://git@github.com:22/12345/vsl-funnel.git
+ROWS
+  pass "an all-numeric owner survives the ssh-port handling instead of silently selecting nothing"
+}
+
+# gh reporting a login in wording this repo cannot read is not the same as nobody
+# being logged in: it means the account cannot be determined, and guessing there
+# is the wrong-identity failure this whole selection exists to prevent.
+test_unparseable_auth_status_refuses() {
+  local rec out status
+  rec=$(new_case unparseable git@github.com:BG-Media-LLC/vsl-funnel.git)
+  read_case "$rec"
+  out=$(FM_FAKE_GH_STATUS_UNPARSEABLE=1 run_gha 'daveonthegit davidx-secco' 'davidx-secco=50' \
+    resolve --dir "$REPO_DIR")
+  status=$?
+  expect_code 1 "$status" "an unreadable 'gh auth status' must fail closed, not fall back"
+  assert_contains "$out" "no github.com login could be read" "the parse failure is not explained"
+  assert_contains "$out" "FM_GH_ACCOUNT" "the refusal does not offer the override"
+  assert_no_probe "unparseable auth status"
+
+  # An opted-out lane still needs nothing, so it is unaffected by the refusal.
+  out=$(FM_FAKE_GH_STATUS_UNPARSEABLE=1 FM_GH_ACCOUNT=none \
+    run_gha 'daveonthegit davidx-secco' 'davidx-secco=50' resolve --dir "$REPO_DIR")
+  expect_code 3 "$?" "FM_GH_ACCOUNT=none should still select nothing"
+  pass "an unreadable 'gh auth status' refuses with its fix instead of using the active account"
 }
 
 # Nothing to choose between: gh missing, nobody logged in, or a single account.
@@ -396,11 +454,28 @@ $1
 EOF
   SENT_LOG="$CASE_DIR/tmux.log"
   : > "$SENT_LOG"
+  # Whether the gh wrapper is installed decides how a lane gets its identity, and
+  # fm-install-gh-shim.sh looks for it under $HOME, so every spawn case owns its
+  # own HOME instead of inheriting whatever this machine has installed.
+  SPAWN_HOME="$CASE_DIR/fakehome"
+  mkdir -p "$SPAWN_HOME"
+}
+
+# install_fake_shim: put a file carrying the wrapper's own marker where
+# fm-install-gh-shim.sh --check looks for it.
+install_fake_shim() {
+  mkdir -p "$SPAWN_HOME/.local/bin"
+  {
+    printf '#!/bin/sh\n'
+    printf '# fm-gh-shim: installed by bin/fm-install-gh-shim.sh\n'
+    printf 'exit 0\n'
+  } > "$SPAWN_HOME/.local/bin/gh"
+  chmod +x "$SPAWN_HOME/.local/bin/gh"
 }
 
 run_spawn() {  # <id> <accounts> <access>
   local id=$1 accounts=$2 access=$3
-  FM_ROOT_OVERRIDE='' FM_HOME="$HOME_DIR" \
+  HOME="$SPAWN_HOME" FM_ROOT_OVERRIDE='' FM_HOME="$HOME_DIR" \
     FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" \
     FM_PROJECTS_OVERRIDE="$HOME_DIR/projects" FM_CONFIG_OVERRIDE="$HOME_DIR/config" \
     FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux TMUX="fake,1,0" \
@@ -410,9 +485,9 @@ run_spawn() {  # <id> <accounts> <access>
     "$SPAWN" "$id" "$PROJ_DIR" --harness claude 2>&1
 }
 
-# The end state the whole change exists for: the lane's own shell is handed the
-# account that repository needs, the durable record says which one, and global gh
-# state was never touched.
+# The end state the whole change exists for, in a home without the gh wrapper:
+# the lane's own shell is handed the account that repository needs, the durable
+# record says which one, and global gh state was never touched.
 test_spawn_hands_the_lane_its_own_account() {
   local rec id out status
   while IFS='|' read -r name id origin accounts access want; do
@@ -434,6 +509,28 @@ spawn-org|gh-spawn-org-z1|git@github.com:BG-Media-LLC/vsl-funnel.git|daveonthegi
 spawn-personal|gh-spawn-personal-z2|git@github.com:daveonthegit/Kyarafit.git|daveonthegit davidx-secco|daveonthegit=50|daveonthegit
 ROWS
   pass "a spawned lane operates as the account its own repository needs, recorded and never switched globally"
+}
+
+# Where the wrapper is installed it keys every call off the repository that call
+# names, so the lane must not also be pinned to one account: a lane-wide
+# credential would win over the wrapper and make a call against the other
+# account's repository run as this lane's account instead.
+test_spawn_leaves_the_credential_to_the_wrapper() {
+  local rec id out status
+  id=gh-spawn-wrapper-z5
+  rec=$(make_spawn_case spawn-wrapper "$id" git@github.com:BG-Media-LLC/vsl-funnel.git)
+  read_spawn_case "$rec"
+  install_fake_shim
+  out=$(run_spawn "$id" 'daveonthegit davidx-secco' 'davidx-secco=50')
+  status=$?
+  expect_code 0 "$status" "spawn with the wrapper installed failed: $out"
+  assert_grep "gh_account=davidx-secco" "$HOME_DIR/state/$id.meta" \
+    "the durable record stopped naming the selected account"
+  assert_no_grep fm-gh-account.sh "$SENT_LOG" \
+    "the lane was pinned to one account even though the wrapper re-keys per repository"
+  assert_no_grep GH_TOKEN "$SENT_LOG" "a credential was sent into the worker's pane"
+  assert_no_violations "wrapper-installed spawn"
+  pass "with the wrapper installed a lane exports nothing and keeps per-repository keying"
 }
 
 # A single-account home spawns exactly as it did before this selection existed.
@@ -515,6 +612,7 @@ auth status|auth status
 config get|config get git_protocol
 gh with no arguments|
 help flag on a repository command|pr list --help
+help flag after a positional argument|pr view 123 -h
 version flag|--version
 another host by flag|pr list --hostname git.example.com
 bare repository name|pr list --repo justaname
@@ -576,6 +674,55 @@ test_shim_runs_repository_work_as_its_own_account() {
   assert_ran_as active "single account"
   assert_no_violations "wrapper"
   pass "repository work runs as that repository's own account; nothing to choose leaves gh alone"
+}
+
+# Every form in which a call names its own repository outranks the directory it
+# happens to run in, and an argument that only looks like a help flag does not
+# hand the call to whichever account is active.
+test_shim_keys_off_every_named_repository() {
+  local rec
+  rec=$(new_case shim-named git@github.com:BG-Media-LLC/vsl-funnel.git)
+  read_case "$rec"
+
+  # pflag accepts a shorthand's value attached to it.
+  run_shim 'daveonthegit davidx-secco' 'daveonthegit=50 davidx-secco=10' "$REPO_DIR" \
+    pr list -Rdaveonthegit/Kyarafit >/dev/null
+  expect_code 0 "$?" "an attached -R value should run"
+  assert_ran_as daveonthegit "attached -R"
+
+  # A value that reads like a help flag is a value, not a request for help.
+  : > "$LOG"
+  run_shim 'daveonthegit davidx-secco' 'davidx-secco=50' "$REPO_DIR" \
+    pr comment 7 --body -v >/dev/null
+  expect_code 0 "$?" "a repository command whose value looks like a flag should run"
+  assert_ran_as davidx-secco "help-looking flag value"
+
+  # gh api names its repository in the endpoint path instead of --repo.
+  : > "$LOG"
+  run_shim 'daveonthegit davidx-secco' 'daveonthegit=50 davidx-secco=10' "$REPO_DIR" \
+    api repos/daveonthegit/Kyarafit/pulls >/dev/null
+  expect_code 0 "$?" "an api call naming a repository should run"
+  assert_grep 'gh api repos/daveonthegit/Kyarafit/pulls' "$LOG" \
+    "the api call itself never reached gh"
+  assert_no_grep 'repos/BG-Media-LLC/vsl-funnel' "$LOG" \
+    "the api call was keyed off the directory instead of the repository it names"
+
+  : > "$LOG"
+  run_shim 'daveonthegit davidx-secco' 'daveonthegit=50 davidx-secco=10' "$REPO_DIR" \
+    api https://api.github.com/repos/daveonthegit/Kyarafit >/dev/null
+  assert_no_grep 'repos/BG-Media-LLC/vsl-funnel' "$LOG" \
+    "an absolute api URL was keyed off the directory instead of the repository it names"
+
+  # gh expands its own {owner}/{repo} placeholders from the working directory, so
+  # such a path stays keyed off that directory.
+  : > "$LOG"
+  run_shim 'daveonthegit davidx-secco' 'davidx-secco=50' "$REPO_DIR" \
+    api 'repos/{owner}/{repo}/pulls' >/dev/null
+  expect_code 0 "$?" "a placeholder api path should run"
+  assert_grep 'repos/BG-Media-LLC/vsl-funnel' "$LOG" \
+    "a placeholder api path was not keyed off the working directory"
+  assert_no_violations "named repositories"
+  pass "an attached -R, an api endpoint path, and a flag-looking value are all keyed off the right repository"
 }
 
 # Refusals: an undeterminable account, and a helper this repo can no longer
@@ -662,6 +809,8 @@ test_installer_is_reversible_and_careful() {
 
 test_both_accounts_resolve_from_the_repository
 test_origin_forms_and_other_forges
+test_numeric_owner_is_not_mistaken_for_a_port
+test_unparseable_auth_status_refuses
 test_nothing_to_choose_leaves_gh_alone
 test_undeterminable_account_fails_closed
 test_recorded_mapping_wins
@@ -669,11 +818,13 @@ test_per_invocation_override
 test_exec_lends_the_credential_to_one_child
 test_env_snippet_fails_closed_in_the_shell
 test_spawn_hands_the_lane_its_own_account
+test_spawn_leaves_the_credential_to_the_wrapper
 test_spawn_without_a_choice_is_unchanged
 test_spawn_refuses_an_undeterminable_account
 test_shim_leaves_gh_alone_where_it_must
 test_shim_never_overrides_an_explicit_credential
 test_shim_runs_repository_work_as_its_own_account
+test_shim_keys_off_every_named_repository
 test_shim_refuses_rather_than_guessing
 test_installer_is_reversible_and_careful
 

@@ -50,10 +50,13 @@
 # cannot silently keep operating as another identity. Evaluate its output only
 # on exit 0 or 1; on exit 3 there is nothing to evaluate.
 #
-# Consumers: bin/fm-spawn.sh resolves the account before launch and exports it
-# into the worker's shell, so every gh, gh-axi, and pipeline call in that lane
-# inherits the right identity; bin/fm-pr-check.sh, bin/fm-pr-merge.sh, and
-# bin/fm-teardown.sh wrap their own forge reads and the merge itself.
+# Consumers: bin/fm-spawn.sh resolves the account before launch and, when the
+# repository-keyed gh wrapper is not installed, exports it into the worker's
+# shell, so every gh, gh-axi, and pipeline call in that lane inherits the right
+# identity; where the wrapper is installed it keys each call off the repository
+# that call names instead, and nothing is exported. bin/fm-pr-check.sh,
+# bin/fm-pr-merge.sh, and bin/fm-teardown.sh wrap their own forge reads and the
+# merge itself.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -103,6 +106,10 @@ gh_as() {  # <token> <gh-arg>...
 
 ACCOUNTS=
 ACCOUNTS_LOADED=0
+# Exit status of the "gh auth status" the list was read from. gh exits 0 only
+# when at least one account is logged in, so 0 with an empty list means the
+# output could not be parsed, which is never the same as "nobody is logged in".
+ACCOUNTS_STATUS=1
 
 # Every login gh reports for github.com, newline separated. Other hosts are out
 # of scope: this selection exists for github.com repositories only.
@@ -112,7 +119,13 @@ ACCOUNTS_LOADED=0
 load_accounts() {
   [ "$ACCOUNTS_LOADED" = 1 ] && return 0
   ACCOUNTS_LOADED=1
-  ACCOUNTS=$(gh_clean auth status 2>&1 \
+  local out
+  if out=$(gh_clean auth status 2>&1); then
+    ACCOUNTS_STATUS=0
+  else
+    ACCOUNTS_STATUS=$?
+  fi
+  ACCOUNTS=$(printf '%s\n' "$out" \
     | sed -n 's/.*Logged in to github\.com account \([A-Za-z0-9][A-Za-z0-9-]*\).*/\1/p')
 }
 
@@ -159,30 +172,31 @@ lower() {
 # "owner/repo" for a checkout whose origin is a github.com repository; non-zero
 # for every other remote, including GitLab and an absent origin.
 origin_repo() {  # <dir>
-  local dir=$1 url rest host path owner repo
+  local dir=$1 url rest host path owner repo scheme=0
   url=$(git -C "$dir" remote get-url origin 2>/dev/null) || return 1
   [ -n "$url" ] || return 1
   rest=$url
   case "$rest" in
-    *://*) rest=${rest#*://} ;;
+    *://*) scheme=1; rest=${rest#*://} ;;
   esac
   rest=${rest#*@}
-  case "$rest" in
-    *:*/*) host=${rest%%:*}; path=${rest#*:} ;;
-    */*) host=${rest%%/*}; path=${rest#*/} ;;
-    *) return 1 ;;
-  esac
-  # An ssh URL may carry a port between host and path; a whole-numeric first
-  # segment is that port, never an owner.
-  case "$path" in
-    */*)
-      case "${path%%/*}" in
-        '' ) ;;
-        *[!0-9]*) ;;
-        *) path=${path#*/} ;;
-      esac
-      ;;
-  esac
+  if [ "$scheme" = 1 ]; then
+    # With a scheme the path always starts at the first slash, so an optional
+    # port belongs to the host and never eats a numeric owner.
+    case "$rest" in
+      */*) host=${rest%%/*}; path=${rest#*/} ;;
+      *) return 1 ;;
+    esac
+    host=${host%%:*}
+  else
+    # scp-style "host:owner/repo" carries no port, so its first path segment is
+    # the owner even when it is all digits.
+    case "$rest" in
+      *:*) host=${rest%%:*}; path=${rest#*:} ;;
+      */*) host=${rest%%/*}; path=${rest#*/} ;;
+      *) return 1 ;;
+    esac
+  fi
   [ "$(lower "$host")" = github.com ] || return 1
   path=${path%/}
   path=${path%.git}
@@ -258,11 +272,20 @@ resolve_account() {  # <owner/repo or empty>
   local best='' best_rank=0 tied=''
 
   command -v gh >/dev/null 2>&1 || return 3
+  [ "${FM_GH_ACCOUNT:-}" = none ] && return 3
   load_accounts
-  [ -n "$ACCOUNTS" ] || return 3
+  if [ -z "$ACCOUNTS" ]; then
+    # Nobody is logged in: there is genuinely nothing to select.
+    [ "$ACCOUNTS_STATUS" = 0 ] || return 3
+    # gh reported a logged-in account whose login this script could not read, so
+    # it cannot tell how many accounts exist or which one owns this repository.
+    # Guessing here is exactly the silent wrong-identity failure this selection
+    # exists to prevent.
+    warn "'gh auth status' reports a logged-in account but no github.com login could be read from its output, so the account for ${spec:-this repository} cannot be determined; check 'gh auth status', or set FM_GH_ACCOUNT=<login> for this run (FM_GH_ACCOUNT=none for work that needs no GitHub API access)"
+    return 1
+  fi
 
   if [ -n "${FM_GH_ACCOUNT:-}" ]; then
-    [ "$FM_GH_ACCOUNT" = none ] && return 3
     if account_known "$FM_GH_ACCOUNT"; then
       printf '%s\n' "$FM_GH_ACCOUNT"
       return 0

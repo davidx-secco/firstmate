@@ -71,9 +71,13 @@ fi
 # bin/fm-review-diff.sh resolves the head from the remote when none is recorded.
 WT=$(grep '^worktree=' "$META" | tail -1 | cut -d= -f2- || true)
 PR_HEAD=
+# Only gh's own stderr is discarded here: an account this home cannot determine is
+# a stated refusal from fm-gh-account.sh, and swallowing it would leave a missing
+# pr_head with no reason.
 if [ "$PROVIDER" = github ] && [ -n "$WT" ] && [ -d "$WT" ] && command -v gh >/dev/null 2>&1; then
+  # shellcheck disable=SC2016  # deliberate: the wrapped shell expands $1, not this one
   if REMOTE_HEAD=$(cd "$WT" && "$SCRIPT_DIR/fm-gh-account.sh" exec --dir "$WT" -- \
-      gh pr view "$URL" --json headRefOid -q .headRefOid 2>/dev/null) \
+      bash -c 'gh pr view "$1" --json headRefOid -q .headRefOid 2>/dev/null' _ "$URL") \
     && fm_pr_head_valid "$REMOTE_HEAD"; then
     PR_HEAD=$REMOTE_HEAD
   fi

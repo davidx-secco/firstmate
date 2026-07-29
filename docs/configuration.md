@@ -265,7 +265,7 @@ An owner listed here wins over any derived answer, and an account named here tha
 Secondmate homes inherit this file from the primary, so the whole fleet resolves the same owners the same way.
 
 `FM_GH_ACCOUNT=<login>` overrides the selection for one invocation, and `FM_GH_ACCOUNT=none` selects nothing for a lane that needs no GitHub API access at all.
-`bin/fm-spawn.sh` resolves the account before it creates anything, records it as `gh_account=` in the task metadata, and exports the credential into the worker's own shell, so every forge call in that lane inherits the right identity.
+`bin/fm-spawn.sh` resolves the account before it creates anything and records it as `gh_account=` in the task metadata.
 A spawn whose account cannot be determined stops at dispatch with the reason and its fix, because an undetermined identity surfaces otherwise as an unexplained "could not resolve to a Repository" error deep inside a pipeline.
 
 Exporting a credential per lane reaches every call firstmate or a worker makes itself, which covers the direct-PR path end to end.
@@ -273,6 +273,9 @@ It cannot reach the forge calls no-mistakes makes from its own shared daemon, wh
 `bin/fm-install-gh-shim.sh` closes that gap by installing `bin/fm-gh-shim.sh` as a `gh` in a directory that precedes the real `gh` on those processes' PATH, so they enter it at exec time with no daemon restart and no change to any `gh` account state.
 The wrapper's own header owns exactly which commands it touches; the short version is that it corrects a command acting on a repository it can identify and passes everything else through untouched, including all of `gh auth`, help and version output, other hosts, and every case where no selection applies.
 When it cannot determine the account for a repository it refuses loudly instead of running as an unintended one.
+
+The two mechanisms do not stack, so a spawn chooses between them: with the wrapper installed, the lane gets no exported credential and every call in it is keyed off the repository that call itself names, including one against a repository the other account owns; without the wrapper, the lane's own shell is given the selected account's credential, which is the only thing that has any effect there.
+`bin/fm-spawn.sh` asks `bin/fm-install-gh-shim.sh --check` which case it is in, and in either case no credential is ever typed into the worker's pane.
 
 Installing it shadows `gh` for every process whose PATH reaches the target directory first, including manual use, which is the cost of correcting processes this repo does not launch.
 `--check` reports what is installed, `--uninstall` removes it, and neither ever replaces or deletes a `gh` this repo did not write.
