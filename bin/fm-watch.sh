@@ -67,10 +67,10 @@ mkdir -p "$STATE"
 # shellcheck source=bin/fm-pending-reply-lib.sh
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
 # The fleet-wide owner of composer classification also owns the per-harness busy
-# signature set this watcher matches against, so the signatures live in exactly
-# one place instead of being duplicated per consumer.
-# shellcheck source=bin/fm-composer-lib.sh
-. "$SCRIPT_DIR/fm-composer-lib.sh"
+# signature set this watcher matches against through fm_busy_lines_match, so the
+# signatures live in exactly one place instead of being duplicated per consumer.
+# shellcheck source=bin/fm-tmux-lib.sh
+. "$SCRIPT_DIR/fm-tmux-lib.sh"
 
 WATCH_LOCK="$STATE/.watch.lock"
 WATCH_PATH="$SCRIPT_DIR/fm-watch.sh"
@@ -115,7 +115,6 @@ SIGNAL_GRACE=${FM_SIGNAL_GRACE:-30}   # seconds to linger after a signal so trai
 # followed by elapsed time is not a safe shared signature for arbitrary harness
 # output. Kimi's moon-plus-middot spinner signature is likewise matched only for
 # a recorded Kimi task.
-BUSY_REGEX=${FM_BUSY_REGEX:-$FM_COMPOSER_BUSY_REGEX_DEFAULT}
 # Always-on wake triage: most wakes during a long crew validation are benign (a
 # working: note or turn-end while a pipeline runs, a no-change heartbeat). Rather
 # than wake firstmate's LLM for each, this watcher classifies every wake in bash
@@ -181,11 +180,7 @@ window_is_busy() {  # <window> <tail40>
     *)
       lines=$(printf '%s' "$tail40" | grep -v '^[[:space:]]*$' | tail -12)
       harness=$(window_harness "$w")
-      if [ -n "${FM_BUSY_REGEX:-}" ]; then
-        printf '%s' "$lines" | grep -qiE "$BUSY_REGEX"
-      else
-        printf '%s' "$lines" | fm_busy_lines_match "$harness"
-      fi
+      printf '%s' "$lines" | fm_busy_lines_match "$harness"
       ;;
   esac
 }

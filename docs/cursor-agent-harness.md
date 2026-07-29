@@ -63,8 +63,9 @@ Recovery resumes in the preserved isolated task directory with `agent --force --
 
 All supported runtime backend integration surfaces were reviewed before enabling the adapter.
 
-- tmux uses the shared busy regex and cursor-row composer classifier.
-  Cursor's foreground command is the generic `node`, so process-level liveness remains conservatively `unknown`; the "tmux process identity" section below records the empirical process evidence, alongside the shared tmux/Pi generic-interpreter gap in [`verification/runtime-backends.md`](verification/runtime-backends.md#tmux).
+- tmux selects a harness-scoped busy signature through `fm_busy_lines_match` in `bin/fm-tmux-lib.sh`, where Cursor has its own `FM_TMUX_CURSOR_BUSY_REGEX_DEFAULT`, and it reads the composer through the structural box scan `fm_tmux_find_composer_box` with the cursor-row read only as a fallback.
+  Cursor's foreground command is the generic `node`, so process-level liveness remains conservatively `unknown`; the "tmux process identity" section below records the empirical process evidence, alongside the Cursor-only generic-interpreter gap in [`verification/runtime-backends.md`](verification/runtime-backends.md#tmux).
+  That gap is Cursor's alone: Pi and pi-signed are now exactly attributable through the `pi-launcher` foreground command.
 - Herdr prefers native registered-agent state when available and falls back to the shared busy regex and structural composer classifier when it is not.
   Its bare composer set now includes `→` and the two Cursor placeholders, and its classifier short-circuits Cursor's on-row `ctrl+c to stop` busy hint to `empty` like the other backends, so the plain-capture composer fallback never re-sends Enter into a live turn.
 - Orca has no native semantic busy state and uses capture plus the shared regex.
@@ -75,7 +76,7 @@ All supported runtime backend integration surfaces were reviewed before enabling
 
 Cursor is refused for secondmate launches.
 This avoids claiming primary session-start, turn-end, watcher, and process-liveness guarantees that have not been empirically verified.
-The existing five primary harness integrations in `docs/sessionstart-nudge.md`, `docs/turnend-guard.md`, `docs/arm-pretool-check.md`, and `docs/supervision-protocols/` remain unchanged.
+The existing six primary harness integrations in `docs/sessionstart-nudge.md`, `docs/turnend-guard.md`, `docs/arm-pretool-check.md`, and `docs/supervision-protocols/` remain unchanged.
 
 ## Empirical verification
 
