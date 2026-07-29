@@ -161,6 +161,7 @@ family_for_basename() {
       printf '%s\n' live-harness-optin
       ;;
     fm-backend-herdr.test.sh|fm-backend-tmux-smoke.test.sh|fm-backend.test.sh|\
+    fm-gh-account.test.sh|\
     fm-herdr-session-cleanup.test.sh|fm-send-strict.test.sh|fm-spawn-batch.test.sh|\
     fm-spawn-dispatch-profile.test.sh|fm-spawn-worktree-settle.test.sh|\
     fm-teardown-endpoint-safety.test.sh)
@@ -667,6 +668,11 @@ families_for_changed_path() {
       ;;
     bin/fm-pr-*|bin/fm-merge-local.sh|bin/fm-teardown.sh|bin/fm-review-diff.sh|\
     bin/fm-x-*|bin/fm-check*)
+      printf '%s\n' pr-forge
+      ;;
+    bin/fm-gh-account.sh|bin/fm-gh-shim.sh|bin/fm-install-gh-shim.sh)
+      # Account selection is consumed at spawn and at every forge call.
+      printf '%s\n' backend-dispatch
       printf '%s\n' pr-forge
       ;;
     bin/fm-spawn.sh|bin/fm-send.sh|bin/fm-harness.sh|\

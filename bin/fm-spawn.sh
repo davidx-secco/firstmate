@@ -863,6 +863,23 @@ BRIEF_REAL="$BRIEF_DIR_REAL/$(basename "$BRIEF")"
 # (docs/herdr-backend.md "Known gaps").
 PROJ_ABS_REAL=$(cd "$PROJ_ABS" 2>/dev/null && pwd -P) || PROJ_ABS_REAL="$PROJ_ABS"
 
+# Which GitHub account this lane must use, keyed off the repository's own origin
+# owner (bin/fm-gh-account.sh owns the resolution order and its exit codes). A
+# task copy sits outside any per-directory account hook, so a home with two
+# logged-in accounts would otherwise hand the lane whichever account is globally
+# active and fail late on a repository that account cannot see. Resolved here,
+# before any backend resource exists, so an undeterminable account stops the
+# spawn at dispatch instead of surfacing as a forge error deep inside a pipeline.
+GH_ACCOUNT_RC=0
+GH_ACCOUNT=$("$FM_ROOT/bin/fm-gh-account.sh" resolve --dir "$PROJ_ABS") || GH_ACCOUNT_RC=$?
+case "$GH_ACCOUNT_RC" in
+  0|3) ;;
+  *)
+    echo "error: cannot select the GitHub account for $PROJ_ABS (see the reason above); fix it, or pass FM_GH_ACCOUNT=<login> for this spawn, or FM_GH_ACCOUNT=none to launch a lane that needs no GitHub API access" >&2
+    exit 1
+    ;;
+esac
+
 real_path_or_raw() {  # <path>
   local path=$1 real
   if real=$(cd "$path" 2>/dev/null && pwd -P); then
@@ -1484,6 +1501,10 @@ META_WINDOW=$T
   echo "tasktmp=$TASK_TMP"
   echo "model=${MODEL:-default}"
   echo "effort=${EFFORT:-default}"
+  # gh_account= records the account this lane operates as, and is written only
+  # when a selection actually applies, so a home with one logged-in account or a
+  # non-GitHub project keeps the metadata it had before.
+  [ -z "$GH_ACCOUNT" ] || echo "gh_account=$GH_ACCOUNT"
   # backend= is written only for a non-default (non-tmux) backend, so the
   # default path's meta stays byte-identical (absent backend= means tmux;
   # data/fm-backend-design-d7's P1 compatibility contract).
@@ -1541,6 +1562,34 @@ fi
 # the env is set when the agent starts; the brief sleep lets the export land.
 spawn_send_text_line "$T" "export GOTMPDIR=$TASK_TMP/gotmp"
 sleep 0.3
+# How this lane gets the right GitHub identity, which depends on whether a gh call
+# actually enters the repository-keyed gh wrapper. bin/fm-install-gh-shim.sh owns
+# that question and answers it with "in effect", so neither an install path nor
+# PATH order is re-derived here: a wrapper installed where nothing resolves to it
+# corrects nothing, and one installed anywhere PATH reaches first corrects
+# everything.
+#
+# With the wrapper in effect, nothing is exported: it keys every gh call in this
+# lane off the repository that call actually names, including one against a
+# repository owned by the other account, while a lane-wide credential would win
+# over it and pin all of them to this lane's account. gh-axi is covered too,
+# because it drives the gh CLI and passes the repository through as --repo.
+#
+# Otherwise the selected account's credential is exported into the worker's own
+# shell, which is then the only thing that has any effect: every gh, gh-axi, and
+# pipeline call in this lane inherits the right identity while global gh state
+# stays untouched and concurrent lanes on other accounts are unaffected. The
+# credential is materialized by the pane's own shell rather than typed into it, so
+# it never reaches the pane's scrollback; a token that cannot be materialized
+# leaves GH_TOKEN unusable rather than silently falling back to the active account
+# (bin/fm-gh-account.sh's "env" contract).
+gh_shim_in_effect() {
+  "$FM_ROOT/bin/fm-install-gh-shim.sh" --check 2>/dev/null | grep -q '^in effect: yes'
+}
+if [ -n "$GH_ACCOUNT" ] && ! gh_shim_in_effect; then
+  spawn_send_text_line "$T" "eval \"\$($(shell_quote "$FM_ROOT/bin/fm-gh-account.sh") env --account $(shell_quote "$GH_ACCOUNT"))\""
+  sleep 0.3
+fi
 spawn_send_literal "$T" "$LAUNCH"
 sleep 0.3
 if [ "${HERDR_PROJECTED:-0}" -eq 1 ]; then

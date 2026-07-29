@@ -81,4 +81,8 @@ if ! caller_has_merge_method "$@"; then
   merge_args=(--squash)
 fi
 
-gh-axi pr merge "$PR_NUMBER" --repo "$PR_OWNER/$PR_REPO" "${merge_args[@]+"${merge_args[@]}"}" "$@"
+# The merge runs as the account that owns access to this repository rather than
+# whichever account is globally active, and refuses to run at all when that
+# account cannot be determined (bin/fm-gh-account.sh).
+"$SCRIPT_DIR/fm-gh-account.sh" exec --repo "$PR_OWNER/$PR_REPO" -- \
+  gh-axi pr merge "$PR_NUMBER" --repo "$PR_OWNER/$PR_REPO" "${merge_args[@]+"${merge_args[@]}"}" "$@"

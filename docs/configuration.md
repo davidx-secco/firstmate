@@ -254,6 +254,35 @@ Malformed JSON, an empty or malformed rule/default array, an unverified harness,
 While the file remains present, no crewmate or scout spawn may proceed without an explicit resolved harness; malformed configuration must be reported and corrected rather than selected around.
 Secondmate homes inherit this file from the primary, so a secondmate's own crewmates apply the same dispatch profile behavior.
 
+## GitHub account selection (config/gh-accounts / FM_GH_ACCOUNT)
+
+A home with more than one account logged in to `gh` needs to know which account each repository belongs to, because worker copies live outside any per-directory shell hook that a human relies on and would otherwise operate as whichever account is globally active.
+`bin/fm-gh-account.sh` selects the account from the repository's own `origin` owner and passes only that account's credential to one child process; its header and `--help` own the resolution order, the exit codes, and every flag.
+Nothing here switches the active `gh` account, so concurrent workers on different accounts never disturb each other, and a home with a single logged-in account behaves exactly as it did before this selection existed.
+
+The optional local, gitignored `config/gh-accounts` records the mapping for owners that cannot be derived, one `<owner> <account>` pair per line, with `#` comments and blank lines ignored and an `=` accepted in place of the space.
+An owner listed here wins over any derived answer, and an account named here that is not logged in is reported as a configuration error rather than worked around.
+Secondmate homes inherit this file from the primary, so the whole fleet resolves the same owners the same way.
+
+`FM_GH_ACCOUNT=<login>` overrides the selection for one invocation, and `FM_GH_ACCOUNT=none` selects nothing for a lane that needs no GitHub API access at all.
+`bin/fm-spawn.sh` resolves the account before it creates anything and records it as `gh_account=` in the task metadata.
+A spawn whose account cannot be determined stops at dispatch with the reason and its fix, because an undetermined identity surfaces otherwise as an unexplained "could not resolve to a Repository" error deep inside a pipeline.
+
+Exporting a credential per lane reaches every call firstmate or a worker makes itself, which covers the direct-PR path end to end.
+It cannot reach the forge calls no-mistakes makes from its own shared daemon, whose environment is fixed when it starts and where one credential could not serve more than one account.
+`bin/fm-install-gh-shim.sh` closes that gap by installing `bin/fm-gh-shim.sh` as a `gh` in a directory that precedes the real `gh` on those processes' PATH, so they enter it at exec time with no daemon restart and no change to any `gh` account state.
+The wrapper's own header owns exactly which commands it touches; the short version is that it corrects a command acting on a repository it can identify and passes everything else through untouched, including all of `gh auth`, help and version output, other hosts, and every case where no selection applies.
+When it cannot determine the account for a repository it refuses loudly instead of running as an unintended one, unless the call also asks for help or a version, which prints exactly what plain `gh` would.
+
+The two mechanisms do not stack, so a spawn chooses between them: where a `gh` call actually enters the wrapper, the lane gets no exported credential and every call in it is keyed off the repository that call itself names, including one against a repository the other account owns; anywhere else the lane's own shell is given the selected account's credential, which is then the only thing that has any effect.
+What decides that is whether `gh` resolves to the wrapper at all, not whether a copy of it exists somewhere: an installed wrapper nothing resolves to corrects nothing, so that lane still needs the credential.
+`bin/fm-spawn.sh` asks `bin/fm-install-gh-shim.sh --check` which case it is in, and in either case no credential is ever typed into the worker's pane.
+
+Installing it shadows `gh` for every process whose PATH reaches the target directory first, including manual use, which is the cost of correcting processes this repo does not launch.
+`--check` reports what is installed and whether the wrapper is in effect for the PATH it runs with, `--uninstall` removes it, and neither ever replaces or deletes a `gh` this repo did not write.
+Install it from a durable checkout, which for firstmate means the primary home: the installed copy records the absolute path of the account helper it calls, so installing from a linked task worktree is refused unless `FM_GH_SHIM_ALLOW_LINKED_WORKTREE=1` deliberately accepts that the copy stops resolving repositories when the worktree goes away.
+Recording an owner in `config/gh-accounts` keeps the wrapper's selection offline and instant; an owner that must be derived by probing costs one API call per `gh` invocation.
+
 ## Toolchain
 
 On session start the first mate detects what its required toolchain is missing or too old and lists each problem with either an exact install command or manual instructions.
@@ -288,7 +317,7 @@ When a running home advances and its loaded instruction surface (`AGENTS.md`, `b
 If that send fails, bootstrap keeps an idempotent retry marker and emits `NUDGE_SECONDMATES:` with the failure reason.
 The same bootstrap run emits `SECONDMATE_LIVENESS:` when a registered secondmate is skipped, its relaunch fails, or a successful relaunch had to substitute the launch harness because `config/crew-harness` names a crewmate/scout-only adapter; already-live and ordinary successfully relaunched secondmates are handled silently.
 For a mid-session inherited local-material edit where tracked-file sync is not needed, run `bin/fm-config-push.sh`.
-It uses the same live secondmate discovery and propagation helper as bootstrap, prints each live home's `crew-dispatch.json`, `crew-harness`, `backlog-backend`, `herdr-presentation-spaces`, and `data/captain-shared.md` result as `pushed`, `unchanged`, `skipped`, or `error`, and exits non-zero for real propagation errors or config-reread send failures.
+It uses the same live secondmate discovery and propagation helper as bootstrap, prints each live home's `crew-dispatch.json`, `crew-harness`, `backlog-backend`, `herdr-presentation-spaces`, `gh-accounts`, and `data/captain-shared.md` result as `pushed`, `unchanged`, `skipped`, or `error`, and exits non-zero for real propagation errors or config-reread send failures.
 When an allowlisted config item changes for an already-running home, it sends the literal-content reread pointer described in [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md); unchanged allowlisted config sends no pointer unless a previous delivery is pending.
 The locked bootstrap inheritance pass uses the same per-home changed-set and reread path for already-running homes; see `secondmate-provisioning` for the single contract owner.
 That live discovery starts from `state/*.meta` records with `kind=secondmate`; `data/secondmates.md` only backfills `home=` for older or incomplete meta records.
@@ -409,6 +438,9 @@ FM_CODEX_WATCH_CHECKPOINT=180   # seconds per foreground watcher checkpoint in C
 FM_CREW_STATE_NM_TIMEOUT=10   # seconds allowed per no-mistakes query inside fm-crew-state.sh
 FM_CREW_STATE_RUNS_LIMIT=200  # recent no-mistakes run rows scanned when axi status cannot be attributed to the current code
 FM_CREW_STATE_BIN=bin/fm-crew-state.sh   # test override for the current-state reader used by working/paused watcher triage
+FM_GH_ACCOUNT=          # one-invocation GitHub account override; "none" selects no account at all
+FM_GH_ACCOUNT_TIMEOUT=10   # seconds allowed per repository-visibility probe when a timeout command is available
+FM_GH_SHIM_ALLOW_LINKED_WORKTREE=0   # warned override that installs the gh wrapper from a linked task worktree; the install must be re-run from a durable checkout before that copy goes away
 FMX_PAIRING_TOKEN=      # X mode pairing token; .env opt-in authorizes replies and eligible lifecycle actions
 FMX_RELAY_URL=https://myfirstmate.io   # optional X relay override, mainly for local relay development
 FMX_ENV_FILE=           # optional alternate .env file for direct X client invocations; bootstrap still checks $FM_HOME/.env
