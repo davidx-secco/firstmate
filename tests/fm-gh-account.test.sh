@@ -53,6 +53,12 @@ case "${1:-} ${2:-}" in
       printf 'github.com\n  x Angemeldet bei github.com als daveonthegit (keyring)\n'
       exit 0
     fi
+    # A home logged in to a GitHub Enterprise host only: gh exits 0, and there is
+    # no github.com account anywhere in the output to get wrong.
+    if [ "${FM_FAKE_GH_ENTERPRISE_ONLY:-0}" = 1 ]; then
+      printf 'git.example.com\n  x Logged in to git.example.com account someone (keyring)\n'
+      exit 0
+    fi
     # Real gh exits non-zero when nobody is logged in anywhere, which is what
     # tells this repo that an empty list means "nothing to select" rather than
     # "output this repo could not read".
@@ -247,7 +253,7 @@ test_unparseable_auth_status_refuses() {
     resolve --dir "$REPO_DIR")
   status=$?
   expect_code 1 "$status" "an unreadable 'gh auth status' must fail closed, not fall back"
-  assert_contains "$out" "no github.com login could be read" "the parse failure is not explained"
+  assert_contains "$out" "no logged-in login could be read" "the parse failure is not explained"
   assert_contains "$out" "FM_GH_ACCOUNT" "the refusal does not offer the override"
   assert_no_probe "unparseable auth status"
 
@@ -255,7 +261,42 @@ test_unparseable_auth_status_refuses() {
   out=$(FM_FAKE_GH_STATUS_UNPARSEABLE=1 FM_GH_ACCOUNT=none \
     run_gha 'daveonthegit davidx-secco' 'davidx-secco=50' resolve --dir "$REPO_DIR")
   expect_code 3 "$?" "FM_GH_ACCOUNT=none should still select nothing"
-  pass "an unreadable 'gh auth status' refuses with its fix instead of using the active account"
+
+  # The override the refusal names has to actually work, and it is the only thing
+  # an unreadable list cannot contradict.
+  out=$(FM_FAKE_GH_STATUS_UNPARSEABLE=1 FM_GH_ACCOUNT=davidx-secco \
+    run_gha 'daveonthegit davidx-secco' 'davidx-secco=50' resolve --dir "$REPO_DIR")
+  status=$?
+  expect_code 0 "$status" "the named override should resolve despite an unreadable list"
+  [ "$out" = davidx-secco ] || fail "the override resolved to '$out'"
+
+  # No github.com repository to select for means no identity was ever needed, so
+  # such a lane is not refused even where the list cannot be read.
+  rec=$(new_case unparseable-gitlab git@gitlab.com:BG-Media-LLC/vsl-funnel.git)
+  read_case "$rec"
+  out=$(FM_FAKE_GH_STATUS_UNPARSEABLE=1 run_gha 'daveonthegit davidx-secco' '' resolve --dir "$REPO_DIR")
+  expect_code 3 "$?" "a non-GitHub checkout must not be refused over an unreadable list"
+
+  rec=$(new_case unparseable-no-origin)
+  read_case "$rec"
+  out=$(FM_FAKE_GH_STATUS_UNPARSEABLE=1 run_gha 'daveonthegit davidx-secco' '' resolve --dir "$REPO_DIR")
+  expect_code 3 "$?" "an originless checkout must not be refused over an unreadable list"
+  pass "an unreadable 'gh auth status' refuses only where an account was needed, and its override works"
+}
+
+# A home logged in to a GitHub Enterprise host only has no github.com account to
+# get wrong, so it must keep behaving exactly as it did before this selection
+# existed rather than being refused.
+test_enterprise_only_home_is_untouched() {
+  local rec out
+  rec=$(new_case enterprise-only git@github.com:BG-Media-LLC/vsl-funnel.git)
+  read_case "$rec"
+  out=$(FM_FAKE_GH_ENTERPRISE_ONLY=1 run_gha 'daveonthegit davidx-secco' 'davidx-secco=50' \
+    resolve --dir "$REPO_DIR")
+  expect_code 3 "$?" "an enterprise-only home should select nothing (output: $out)"
+  [ -z "$out" ] || fail "an enterprise-only home produced output: $out"
+  assert_no_probe "enterprise-only home"
+  pass "a home logged in to another host only is left exactly as it was"
 }
 
 # Nothing to choose between: gh missing, nobody logged in, or a single account.
@@ -454,23 +495,41 @@ $1
 EOF
   SENT_LOG="$CASE_DIR/tmux.log"
   : > "$SENT_LOG"
-  # Whether the gh wrapper is installed decides how a lane gets its identity, and
-  # fm-install-gh-shim.sh looks for it under $HOME, so every spawn case owns its
-  # own HOME instead of inheriting whatever this machine has installed.
+  # Whether a gh call enters the wrapper decides how a lane gets its identity, and
+  # fm-install-gh-shim.sh answers that from $HOME and from PATH, so every spawn
+  # case owns both instead of inheriting whatever this machine has installed.
   SPAWN_HOME="$CASE_DIR/fakehome"
+  SPAWN_PATH_PREFIX=
   mkdir -p "$SPAWN_HOME"
 }
 
-# install_fake_shim: put a file carrying the wrapper's own marker where
-# fm-install-gh-shim.sh --check looks for it.
-install_fake_shim() {
+MARKER='# fm-gh-shim: installed by bin/fm-install-gh-shim.sh'
+
+# A wrapper installed at the default target that no PATH lookup reaches, which
+# corrects nothing at all.
+install_shim_off_path() {
   mkdir -p "$SPAWN_HOME/.local/bin"
   {
     printf '#!/bin/sh\n'
-    printf '# fm-gh-shim: installed by bin/fm-install-gh-shim.sh\n'
+    printf '%s\n' "$MARKER"
     printf 'exit 0\n'
   } > "$SPAWN_HOME/.local/bin/gh"
   chmod +x "$SPAWN_HOME/.local/bin/gh"
+}
+
+# A wrapper installed somewhere other than the default target that a gh call does
+# reach: the fake gh's own behavior plus the wrapper's marker, so resolution still
+# works while gh resolves to a wrapper.
+install_shim_in_path() {
+  local dir="$CASE_DIR/shimbin"
+  mkdir -p "$dir"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf '%s\n' "$MARKER"
+    tail -n +2 "$FAKEBIN/gh"
+  } > "$dir/gh"
+  chmod +x "$dir/gh"
+  SPAWN_PATH_PREFIX="$dir"
 }
 
 run_spawn() {  # <id> <accounts> <access>
@@ -481,7 +540,7 @@ run_spawn() {  # <id> <accounts> <access>
     FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux TMUX="fake,1,0" \
     FM_FAKE_PANE_PATH="$WT_DIR" FM_FAKE_TMUX_LOG="$SENT_LOG" \
     FM_FAKE_GH_ACCOUNTS="$accounts" FM_FAKE_GH_ACCESS="$access" FM_FAKE_GH_LOG="$LOG" \
-    PATH="$FAKEBIN:$PATH" \
+    PATH="${SPAWN_PATH_PREFIX:+$SPAWN_PATH_PREFIX:}$FAKEBIN:$PATH" \
     "$SPAWN" "$id" "$PROJ_DIR" --harness claude 2>&1
 }
 
@@ -520,17 +579,38 @@ test_spawn_leaves_the_credential_to_the_wrapper() {
   id=gh-spawn-wrapper-z5
   rec=$(make_spawn_case spawn-wrapper "$id" git@github.com:BG-Media-LLC/vsl-funnel.git)
   read_spawn_case "$rec"
-  install_fake_shim
+  # Installed away from the default target, but ahead of the real gh.
+  install_shim_in_path
   out=$(run_spawn "$id" 'daveonthegit davidx-secco' 'davidx-secco=50')
   status=$?
-  expect_code 0 "$status" "spawn with the wrapper installed failed: $out"
+  expect_code 0 "$status" "spawn with the wrapper in effect failed: $out"
   assert_grep "gh_account=davidx-secco" "$HOME_DIR/state/$id.meta" \
     "the durable record stopped naming the selected account"
   assert_no_grep fm-gh-account.sh "$SENT_LOG" \
     "the lane was pinned to one account even though the wrapper re-keys per repository"
   assert_no_grep GH_TOKEN "$SENT_LOG" "a credential was sent into the worker's pane"
-  assert_no_violations "wrapper-installed spawn"
-  pass "with the wrapper installed a lane exports nothing and keeps per-repository keying"
+  assert_no_violations "wrapper-in-effect spawn"
+  pass "where a gh call enters the wrapper a lane exports nothing and keeps per-repository keying"
+}
+
+# The other direction: a wrapper that exists but that no gh call reaches corrects
+# nothing, so the lane still needs its own credential. Trusting the file alone
+# would leave such a home with neither mechanism.
+test_spawn_exports_when_the_wrapper_is_not_reached() {
+  local rec id out status
+  id=gh-spawn-offpath-z6
+  rec=$(make_spawn_case spawn-offpath "$id" git@github.com:BG-Media-LLC/vsl-funnel.git)
+  read_spawn_case "$rec"
+  install_shim_off_path
+  out=$(run_spawn "$id" 'daveonthegit davidx-secco' 'davidx-secco=50')
+  status=$?
+  expect_code 0 "$status" "spawn with an unreachable wrapper failed: $out"
+  assert_grep "env --account 'davidx-secco'" "$SENT_LOG" \
+    "a lane whose gh calls never enter the wrapper was left with no identity at all"
+  assert_no_grep "GH_TOKEN='ghtoken" "$SENT_LOG" \
+    "a credential was typed into the worker's pane"
+  assert_no_violations "unreachable-wrapper spawn"
+  pass "an installed wrapper nothing resolves to still leaves the lane its own credential"
 }
 
 # A single-account home spawns exactly as it did before this selection existed.
@@ -738,6 +818,16 @@ test_shim_refuses_rather_than_guessing() {
   assert_contains "$out" "not running gh as an unintended account" "refusal is not stated"
   assert_contains "$out" "remove this wrapper" "refusal does not say how to undo the wrapper"
 
+  # Which account a help request runs as cannot change its output, and flag arity
+  # is not knowable here, so a help flag anywhere prints gh's own help rather than
+  # turning into a refusal plain gh would never have produced.
+  : > "$LOG"
+  out=$(run_shim 'daveonthegit davidx-secco' '' "$REPO_DIR" pr list --draft --help)
+  expect_code 0 "$?" "a help request must print help rather than be refused: $out"
+  assert_ran_as active "help request on the refusal path"
+  assert_not_contains "$out" "not running gh as an unintended account" \
+    "a help request was refused instead of passed through"
+
   : > "$LOG"
   out=$( cd "$REPO_DIR" && FM_GH_REAL="$FAKEBIN/gh" FM_GH_ACCOUNT_BIN="$CASE_DIR/gone.sh" \
     FM_FAKE_GH_ACCOUNTS='daveonthegit davidx-secco' FM_FAKE_GH_LOG="$LOG" \
@@ -781,6 +871,11 @@ test_installer_is_reversible_and_careful() {
 
   out=$(PATH="$FAKEBIN:$PATH" FM_GH_SHIM_ALLOW_LINKED_WORKTREE=1 "$INSTALLER" --check --target "$target" 2>&1)
   assert_contains "$out" "installed: $installed" "--check does not report the install"
+  # What decides whether the wrapper corrects anything is which gh a call reaches,
+  # not whether a copy exists, so --check answers that question too.
+  assert_contains "$out" "in effect: no" "--check calls a wrapper no gh lookup reaches effective"
+  out=$(PATH="$target:$FAKEBIN:$PATH" FM_GH_SHIM_ALLOW_LINKED_WORKTREE=1 "$INSTALLER" --check --target "$target" 2>&1)
+  assert_contains "$out" "in effect: yes" "--check does not report a wrapper a gh lookup does reach"
 
   # A machine-wide wrapper must not record a path that disappears with a task
   # worktree, so installing from one is refused on its own.
@@ -811,6 +906,7 @@ test_both_accounts_resolve_from_the_repository
 test_origin_forms_and_other_forges
 test_numeric_owner_is_not_mistaken_for_a_port
 test_unparseable_auth_status_refuses
+test_enterprise_only_home_is_untouched
 test_nothing_to_choose_leaves_gh_alone
 test_undeterminable_account_fails_closed
 test_recorded_mapping_wins
@@ -819,6 +915,7 @@ test_exec_lends_the_credential_to_one_child
 test_env_snippet_fails_closed_in_the_shell
 test_spawn_hands_the_lane_its_own_account
 test_spawn_leaves_the_credential_to_the_wrapper
+test_spawn_exports_when_the_wrapper_is_not_reached
 test_spawn_without_a_choice_is_unchanged
 test_spawn_refuses_an_undeterminable_account
 test_shim_leaves_gh_alone_where_it_must

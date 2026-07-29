@@ -1562,28 +1562,31 @@ fi
 # the env is set when the agent starts; the brief sleep lets the export land.
 spawn_send_text_line "$T" "export GOTMPDIR=$TASK_TMP/gotmp"
 sleep 0.3
-# How this lane gets the right GitHub identity, which depends on whether the
-# repository-keyed gh wrapper is installed (bin/fm-install-gh-shim.sh owns that
-# question, so no install path is re-derived here).
+# How this lane gets the right GitHub identity, which depends on whether a gh call
+# actually enters the repository-keyed gh wrapper. bin/fm-install-gh-shim.sh owns
+# that question and answers it with "in effect", so neither an install path nor
+# PATH order is re-derived here: a wrapper installed where nothing resolves to it
+# corrects nothing, and one installed anywhere PATH reaches first corrects
+# everything.
 #
-# With the wrapper installed, nothing is exported: the wrapper keys every gh call
-# in this lane off the repository that call actually names, including one against
-# a repository owned by the other account, while a lane-wide credential would
-# instead pin all of them to this lane's account. gh-axi is covered too, because
-# it drives the gh CLI and passes the repository through as --repo.
+# With the wrapper in effect, nothing is exported: it keys every gh call in this
+# lane off the repository that call actually names, including one against a
+# repository owned by the other account, while a lane-wide credential would win
+# over it and pin all of them to this lane's account. gh-axi is covered too,
+# because it drives the gh CLI and passes the repository through as --repo.
 #
-# Without the wrapper, the selected account's credential is exported into the
-# worker's own shell, which is the only thing that has any effect there: every gh,
-# gh-axi, and pipeline call in this lane inherits the right identity while global
-# gh state stays untouched and concurrent lanes on other accounts are unaffected.
-# The credential is materialized by the pane's own shell rather than typed into
-# it, so it never reaches the pane's scrollback; a token that cannot be
-# materialized leaves GH_TOKEN unusable rather than silently falling back to the
-# active account (bin/fm-gh-account.sh's "env" contract).
-gh_shim_installed() {
-  "$FM_ROOT/bin/fm-install-gh-shim.sh" --check 2>/dev/null | grep -q '^installed: '
+# Otherwise the selected account's credential is exported into the worker's own
+# shell, which is then the only thing that has any effect: every gh, gh-axi, and
+# pipeline call in this lane inherits the right identity while global gh state
+# stays untouched and concurrent lanes on other accounts are unaffected. The
+# credential is materialized by the pane's own shell rather than typed into it, so
+# it never reaches the pane's scrollback; a token that cannot be materialized
+# leaves GH_TOKEN unusable rather than silently falling back to the active account
+# (bin/fm-gh-account.sh's "env" contract).
+gh_shim_in_effect() {
+  "$FM_ROOT/bin/fm-install-gh-shim.sh" --check 2>/dev/null | grep -q '^in effect: yes'
 }
-if [ -n "$GH_ACCOUNT" ] && ! gh_shim_installed; then
+if [ -n "$GH_ACCOUNT" ] && ! gh_shim_in_effect; then
   spawn_send_text_line "$T" "eval \"\$($(shell_quote "$FM_ROOT/bin/fm-gh-account.sh") env --account $(shell_quote "$GH_ACCOUNT"))\""
   sleep 0.3
 fi

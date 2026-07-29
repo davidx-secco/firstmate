@@ -272,13 +272,14 @@ Exporting a credential per lane reaches every call firstmate or a worker makes i
 It cannot reach the forge calls no-mistakes makes from its own shared daemon, whose environment is fixed when it starts and where one credential could not serve more than one account.
 `bin/fm-install-gh-shim.sh` closes that gap by installing `bin/fm-gh-shim.sh` as a `gh` in a directory that precedes the real `gh` on those processes' PATH, so they enter it at exec time with no daemon restart and no change to any `gh` account state.
 The wrapper's own header owns exactly which commands it touches; the short version is that it corrects a command acting on a repository it can identify and passes everything else through untouched, including all of `gh auth`, help and version output, other hosts, and every case where no selection applies.
-When it cannot determine the account for a repository it refuses loudly instead of running as an unintended one.
+When it cannot determine the account for a repository it refuses loudly instead of running as an unintended one, unless the call also asks for help or a version, which prints exactly what plain `gh` would.
 
-The two mechanisms do not stack, so a spawn chooses between them: with the wrapper installed, the lane gets no exported credential and every call in it is keyed off the repository that call itself names, including one against a repository the other account owns; without the wrapper, the lane's own shell is given the selected account's credential, which is the only thing that has any effect there.
+The two mechanisms do not stack, so a spawn chooses between them: where a `gh` call actually enters the wrapper, the lane gets no exported credential and every call in it is keyed off the repository that call itself names, including one against a repository the other account owns; anywhere else the lane's own shell is given the selected account's credential, which is then the only thing that has any effect.
+What decides that is whether `gh` resolves to the wrapper at all, not whether a copy of it exists somewhere: an installed wrapper nothing resolves to corrects nothing, so that lane still needs the credential.
 `bin/fm-spawn.sh` asks `bin/fm-install-gh-shim.sh --check` which case it is in, and in either case no credential is ever typed into the worker's pane.
 
 Installing it shadows `gh` for every process whose PATH reaches the target directory first, including manual use, which is the cost of correcting processes this repo does not launch.
-`--check` reports what is installed, `--uninstall` removes it, and neither ever replaces or deletes a `gh` this repo did not write.
+`--check` reports what is installed and whether the wrapper is in effect for the PATH it runs with, `--uninstall` removes it, and neither ever replaces or deletes a `gh` this repo did not write.
 Recording an owner in `config/gh-accounts` keeps the wrapper's selection offline and instant; an owner that must be derived by probing costs one API call per `gh` invocation.
 
 ## Toolchain

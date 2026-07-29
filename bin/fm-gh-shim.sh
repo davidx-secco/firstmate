@@ -28,6 +28,9 @@
 #   - a host other than github.com, from --hostname or GH_HOST
 #   - a --repo naming a bare repository name, which only gh's own active account
 #     can expand
+#   - anything at all when no account selection applies: not a github.com
+#     checkout, one account logged in, nobody logged in (fm-gh-account.sh's
+#     "nothing to select" exit)
 #
 # Keyed off the repository the call names rather than the directory it runs in:
 #   - --repo/-R in all of gh's own forms, including "-Rowner/repo"
@@ -35,12 +38,12 @@
 #     leading slash or an https://api.github.com prefix; every other endpoint,
 #     including one holding gh's own {owner}/{repo} placeholders, stays keyed off
 #     the working directory
-#   - anything at all when no account selection applies: not a github.com
-#     checkout, one account logged in, nobody logged in (fm-gh-account.sh's
-#     "nothing to select" exit)
 #
 # Refused loudly, never run as an unintended account:
-#   - a repository whose account cannot be determined
+#   - a repository whose account cannot be determined, unless a help or version
+#     flag appears anywhere in the arguments: flag arity is not knowable here, so
+#     a help request this wrapper read as repository work still prints gh's own
+#     output, after the reason it could not be keyed
 #   - an unreachable bin/fm-gh-account.sh while more than one account is logged
 #     in, which is the only case where passing through could silently pick the
 #     wrong identity; with one account or none there is nothing to get wrong, so
@@ -115,7 +118,16 @@ esac
 # nothing after "--" does: "gh pr comment --body -v" asks for no help, and
 # passing it through unkeyed would run it as whichever account is active.
 # Anything this misreads as repository work is still keyed rather than guessed,
-# and gh's own help output does not depend on which account it runs as.
+# and gh's own help output does not depend on which account it runs as; a help or
+# version flag anywhere in the arguments is what keeps such a call printing help
+# instead of being refused when no account can be determined for it.
+HELP_ANYWHERE=0
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help|-v|-V|--version) HELP_ANYWHERE=1; break ;;
+  esac
+done
+
 PREV=
 for arg in "$@"; do
   [ "$arg" = -- ] && break
@@ -232,6 +244,11 @@ case "$SELECT_RC" in
   0) exec "$FM_GH_ACCOUNT_BIN" exec --account "$ACCOUNT" -- "$REAL" "$@" ;;
   3) exec "$REAL" "$@" ;;
   *)
+    # A call carrying a help or version flag anywhere prints gh's own output
+    # instead of being refused: which account it runs as cannot change that
+    # output, and flag arity is not knowable here, so a help request that this
+    # wrapper read as repository work must still behave like plain gh.
+    [ "$HELP_ANYWHERE" = 1 ] && exec "$REAL" "$@"
     printf 'fm-gh-shim: not running gh as an unintended account for this repository (reason above); remove this wrapper (%s) to go back to plain gh\n' \
       "$(self_path || printf '%s' "$0")" >&2
     exit 1

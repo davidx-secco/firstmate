@@ -40,7 +40,7 @@
 #      fall back to the active account
 #   2  usage error
 #   3  no selection applies, so gh keeps whatever the caller already had: gh is
-#      absent, no account is logged in, exactly one account is logged in,
+#      absent, no account is logged in to github.com, exactly one account is,
 #      FM_GH_ACCOUNT=none, or origin is not a github.com repository
 #
 # "token" and "env" refuse to write to a terminal, so a credential reaches only
@@ -106,10 +106,14 @@ gh_as() {  # <token> <gh-arg>...
 
 ACCOUNTS=
 ACCOUNTS_LOADED=0
-# Exit status of the "gh auth status" the list was read from. gh exits 0 only
-# when at least one account is logged in, so 0 with an empty list means the
-# output could not be parsed, which is never the same as "nobody is logged in".
+# Exit status of the "gh auth status" the list was read from, and whether that
+# output mentioned github.com at all. gh exits 0 when any host is authenticated,
+# including a GitHub Enterprise host alone, so only these two together separate
+# "github.com is authenticated in wording this script cannot read" from the two
+# cases that genuinely have nothing to select: nobody logged in anywhere, and a
+# home logged in to another host only.
 ACCOUNTS_STATUS=1
+ACCOUNTS_SAW_GITHUB_COM=0
 
 # Every login gh reports for github.com, newline separated. Other hosts are out
 # of scope: this selection exists for github.com repositories only.
@@ -127,6 +131,18 @@ load_accounts() {
   fi
   ACCOUNTS=$(printf '%s\n' "$out" \
     | sed -n 's/.*Logged in to github\.com account \([A-Za-z0-9][A-Za-z0-9-]*\).*/\1/p')
+  case "$out" in
+    *github.com*) ACCOUNTS_SAW_GITHUB_COM=1 ;;
+  esac
+}
+
+# True only when gh reports github.com as authenticated in wording no login could
+# be read from, which is the one case where an account exists to get wrong and
+# this script cannot tell which. Nobody logged in, and a home logged in to
+# another host only, both stay outside it.
+accounts_unreadable() {
+  load_accounts
+  [ -z "$ACCOUNTS" ] && [ "$ACCOUNTS_STATUS" = 0 ] && [ "$ACCOUNTS_SAW_GITHUB_COM" = 1 ]
 }
 
 account_count() {
@@ -274,19 +290,11 @@ resolve_account() {  # <owner/repo or empty>
   command -v gh >/dev/null 2>&1 || return 3
   [ "${FM_GH_ACCOUNT:-}" = none ] && return 3
   load_accounts
-  if [ -z "$ACCOUNTS" ]; then
-    # Nobody is logged in: there is genuinely nothing to select.
-    [ "$ACCOUNTS_STATUS" = 0 ] || return 3
-    # gh reported a logged-in account whose login this script could not read, so
-    # it cannot tell how many accounts exist or which one owns this repository.
-    # Guessing here is exactly the silent wrong-identity failure this selection
-    # exists to prevent.
-    warn "'gh auth status' reports a logged-in account but no github.com login could be read from its output, so the account for ${spec:-this repository} cannot be determined; check 'gh auth status', or set FM_GH_ACCOUNT=<login> for this run (FM_GH_ACCOUNT=none for work that needs no GitHub API access)"
-    return 1
-  fi
 
   if [ -n "${FM_GH_ACCOUNT:-}" ]; then
-    if account_known "$FM_GH_ACCOUNT"; then
+    # An unreadable account list cannot contradict a login the caller named
+    # itself, so the override stays the way out of exactly that situation.
+    if account_known "$FM_GH_ACCOUNT" || accounts_unreadable; then
       printf '%s\n' "$FM_GH_ACCOUNT"
       return 0
     fi
@@ -294,7 +302,20 @@ resolve_account() {  # <owner/repo or empty>
     return 1
   fi
 
+  # No github.com repository to select for, so no identity was ever needed.
   [ -n "$spec" ] || return 3
+
+  if [ -z "$ACCOUNTS" ]; then
+    # Nobody logged in, or logged in to another host only: nothing to select.
+    accounts_unreadable || return 3
+    # github.com is authenticated in wording this script cannot read, so it
+    # cannot tell how many accounts exist or which one owns this repository.
+    # Guessing here is exactly the silent wrong-identity failure this selection
+    # exists to prevent.
+    warn "'gh auth status' reports github.com but no logged-in login could be read from its output, so the account for $spec cannot be determined; check 'gh auth status', or set FM_GH_ACCOUNT=<login> for this run (FM_GH_ACCOUNT=none for work that needs no GitHub API access)"
+    return 1
+  fi
+
   # One account is not a choice, so the whole selection stays out of the way and
   # gh behaves exactly as it did before this script existed.
   [ "$(account_count)" -gt 1 ] || return 3
@@ -389,7 +410,7 @@ fi
 SPEC=
 STATUS=0
 if [ -n "$ACCOUNT" ]; then
-  if account_known "$ACCOUNT"; then
+  if account_known "$ACCOUNT" || accounts_unreadable; then
     LOGIN=$ACCOUNT
   else
     warn "$ACCOUNT is not logged in to github.com (logged in: $(account_list)); log it in with 'gh auth login'"

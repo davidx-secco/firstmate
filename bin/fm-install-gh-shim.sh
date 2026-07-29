@@ -12,7 +12,10 @@
 # Usage:
 #   fm-install-gh-shim.sh [--target <dir>]     install or refresh the wrapper
 #   fm-install-gh-shim.sh --check [--target <dir>]
-#                                              report what is installed
+#                                              report what is installed, which gh
+#                                              is the real one, and whether a gh
+#                                              call made with this PATH enters
+#                                              the wrapper ("in effect: yes")
 #   fm-install-gh-shim.sh --uninstall [--target <dir>]
 #                                              remove a wrapper this repo wrote
 #   fm-install-gh-shim.sh --help
@@ -102,6 +105,18 @@ case "$MODE" in
       printf 'real gh: %s\n' "$real"
     else
       printf 'real gh: not found on this PATH\n'
+    fi
+    # Whether a gh call made with this PATH enters the wrapper at all, which is
+    # the only thing that decides whether the wrapper is correcting anything.
+    # A file at --target that nothing resolves to corrects nothing, and a wrapper
+    # installed elsewhere corrects everything if PATH reaches it first.
+    path_gh=$(command -v gh 2>/dev/null) || path_gh=
+    if [ -n "$path_gh" ] && is_our_shim "$path_gh"; then
+      printf 'in effect: yes, gh resolves to %s\n' "$path_gh"
+    elif [ -n "$path_gh" ]; then
+      printf 'in effect: no, gh resolves to %s\n' "$path_gh"
+    else
+      printf 'in effect: no, no gh on this PATH\n'
     fi
     exit 0
     ;;
