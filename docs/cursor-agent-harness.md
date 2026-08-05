@@ -40,7 +40,12 @@ The idle composer uses the agent-only `→` glyph with `Add a follow-up` after a
 The shared composer classifier recognizes that glyph and both placeholders without weakening the rule that a bare shell prompt is never safe for injection.
 
 No Cursor per-turn hook is verified.
-Cursor workers therefore use Firstmate's ordinary pane hashing, busy hint, and stable-idle monitoring path.
+Cursor therefore has no entry in `fm_busy_sources_for_harness` and no rendered-tail arm in the classifier, so `fm_busy_classify` returns `unknown` for a cursor task and a generating Cursor pane is never read as busy worker state.
+That matches the posture upstream ships for codex and for standalone kimi before verification.
+A generating Cursor crewmate is consequently never exempted as provably working: the watcher reaches its stale and escalation path on pane-hash stability alone.
+
+The rendered `ctrl+c to stop` hint still does real work, just not worker classification.
+It feeds the submit-acknowledgement and away-mode delivery guards in `bin/fm-tmux-lib.sh` and the herdr, cmux, and orca composer classifiers.
 
 ## Interrupt, exit, and resume
 

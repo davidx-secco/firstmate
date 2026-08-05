@@ -906,6 +906,7 @@ families_for_changed_path() {
     bin/fm-gh-account.sh|bin/fm-gh-shim.sh|bin/fm-install-gh-shim.sh)
       # Account selection is consumed at spawn and at every forge call.
       printf '%s\n' backend-dispatch
+      printf '%s\n' pr-forge
       ;;
     bin/fm-nm-run-lib.sh)
       # Shared no-mistakes run-attribution primitives, sourced by both
