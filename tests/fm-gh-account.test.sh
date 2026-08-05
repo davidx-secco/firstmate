@@ -550,7 +550,7 @@ run_spawn() {  # <id> <accounts> <access>
     FM_FAKE_PANE_PATH="$WT_DIR" FM_FAKE_TMUX_LOG="$SENT_LOG" \
     FM_FAKE_GH_ACCOUNTS="$accounts" FM_FAKE_GH_ACCESS="$access" FM_FAKE_GH_LOG="$LOG" \
     PATH="${SPAWN_PATH_PREFIX:+$SPAWN_PATH_PREFIX:}$FAKEBIN:$PATH" \
-    "$SPAWN" "$id" "$PROJ_DIR" --harness claude 2>&1
+    "$SPAWN" "$id" "$PROJ_DIR" --harness claude --mode no-mistakes --yolo off 2>&1
 }
 
 # The end state the whole change exists for, in a home without the gh wrapper:
