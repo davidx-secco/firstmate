@@ -343,6 +343,7 @@ For any custom `state/<id>.check.sh` you write yourself, keep it an ordinary sin
 Tear down a ship task only after landing is confirmed.
 A teardown refusal for uncommitted or unlanded work is a stop-and-investigate result, never an obstacle to bypass.
 Never force teardown without explicit discard authority.
+When teardown instead refuses a Herdr task for lacking an exact endpoint binding, the only sanctioned repair is `bin/fm-endpoint-rebind.sh <id>`, which establishes that binding from live runtime evidence or releases a provably absent endpoint; it never authorizes forcing, and the unlanded-work checks still apply afterwards.
 After successful teardown, record completion, retain only the configured recent Done history, and re-evaluate queued work whose blockers and time gates have cleared.
 
 A secondmate is persistent and an empty queue is healthy.

@@ -30,8 +30,31 @@ printf ' <%s>' "$@" >> "${FM_RUNTIME_LOG:?}"
 printf '\n' >> "${FM_RUNTIME_LOG:?}"
 exit 0
 SH
-  chmod +x "$TMP_ROOT/$dir/fakebin/tmux" "$TMP_ROOT/$dir/fakebin/treehouse"
+  # Logged, never canned: these suites assert that cleanup issues no runtime
+  # endpoint command at all in the cases below, so any herdr call is a failure.
+  cat > "$TMP_ROOT/$dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+printf 'herdr' >> "${FM_RUNTIME_LOG:?}"
+printf ' <%s>' "$@" >> "${FM_RUNTIME_LOG:?}"
+printf '\n' >> "${FM_RUNTIME_LOG:?}"
+exit 0
+SH
+  chmod +x "$TMP_ROOT/$dir/fakebin/tmux" "$TMP_ROOT/$dir/fakebin/treehouse" \
+    "$TMP_ROOT/$dir/fakebin/herdr"
   printf '%s\n' "$TMP_ROOT/$dir"
+}
+
+# The legacy Herdr record at the centre of these cases: structurally complete and
+# internally consistent, but written before fm-spawn.sh stamped
+# endpoint_task_id=. Extra fields let a case add a binding or release marker.
+write_legacy_herdr_meta() {  # <case> <id> [extra-field...]
+  local dir=$1 id=$2
+  shift 2
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=lab:w1:p2" "worktree=$dir/worktree" "project=$dir/project" \
+    "kind=scout" "mode=no-mistakes" "backend=herdr" \
+    "herdr_session=lab" "herdr_workspace_id=w1" \
+    "herdr_tab_id=w1:t2" "herdr_pane_id=w1:p2" "$@"
 }
 
 run_case() {  # <case> <id>
@@ -93,6 +116,77 @@ test_invalid_endpoint_records_refuse_before_mutation() {
   pass "fm-teardown: missing, empty, malformed, ambiguous, and task-mismatched endpoints refuse before every mutation or runtime call"
 }
 
+# The refusal this whole feature is built around must survive it. An opaque Herdr
+# record with no proven identity still refuses, --force included, and now points
+# at the sanctioned repair instead of leaving the operator with no move.
+test_unbound_herdr_endpoint_still_refuses_and_names_the_repair() {
+  local dir id=endpoint-legacy
+  dir=$(make_case legacy-unbound)
+  write_legacy_herdr_meta "$dir" "$id"
+  assert_refused_without_mutation "$dir" "$id" "legacy unbound Herdr endpoint"
+  grep -q 'lacks an exact task binding' "$dir/stderr" \
+    || fail "legacy unbound Herdr endpoint: refusal lost its reason: $(cat "$dir/stderr")"
+  grep -q 'fm-endpoint-rebind.sh' "$dir/stderr" \
+    || fail "legacy unbound Herdr endpoint: refusal did not name the sanctioned repair"
+  grep -q 'no forcing path' "$dir/stderr" \
+    || fail "legacy unbound Herdr endpoint: refusal did not rule out forcing"
+  pass "fm-teardown: an unproven Herdr endpoint still refuses under --force and names the sanctioned repair"
+}
+
+# The release marker is a narrow authorization, not a second force flag: anything
+# other than exactly one marker naming exactly this task refuses.
+test_malformed_release_markers_refuse() {
+  local dir id=endpoint-release
+
+  dir=$(make_case release-empty)
+  write_legacy_herdr_meta "$dir" "$id" "endpoint_released="
+  assert_refused_without_mutation "$dir" "$id" "empty release marker"
+
+  dir=$(make_case release-duplicate)
+  write_legacy_herdr_meta "$dir" "$id" "endpoint_released=$id" "endpoint_released=$id"
+  assert_refused_without_mutation "$dir" "$id" "duplicate release marker"
+
+  dir=$(make_case release-foreign)
+  write_legacy_herdr_meta "$dir" "$id" "endpoint_released=other-task"
+  assert_refused_without_mutation "$dir" "$id" "release marker naming another task"
+
+  dir=$(make_case release-with-binding)
+  write_legacy_herdr_meta "$dir" "$id" "endpoint_task_id=$id" "endpoint_released=$id"
+  assert_refused_without_mutation "$dir" "$id" "release marker alongside a binding"
+
+  # A release marker cannot smuggle a broken record past the structural checks.
+  dir=$(make_case release-inconsistent)
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=lab:w1:p99" "worktree=$dir/worktree" "project=$dir/project" \
+    "kind=scout" "backend=herdr" "endpoint_released=$id" \
+    "herdr_session=lab" "herdr_workspace_id=w1" \
+    "herdr_tab_id=w1:t2" "herdr_pane_id=w1:p2"
+  assert_refused_without_mutation "$dir" "$id" "release marker on an inconsistent record"
+
+  pass "fm-teardown: an empty, duplicated, foreign, contradictory, or inconsistent release marker refuses"
+}
+
+# The release outcome's whole promise: cleanup completes without commanding the
+# runtime endpoint even once.
+test_released_endpoint_cleans_up_without_touching_the_runtime() {
+  local dir id=endpoint-released
+  dir=$(make_case release-completes)
+  write_legacy_herdr_meta "$dir" "$id" "endpoint_released=$id"
+
+  run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "released endpoint teardown failed: $(cat "$dir/stderr")"
+  grep -q '^herdr' "$dir/runtime.log" \
+    && fail "released endpoint teardown commanded herdr: $(cat "$dir/runtime.log")"
+  grep -q '^tmux' "$dir/runtime.log" \
+    && fail "released endpoint teardown commanded tmux: $(cat "$dir/runtime.log")"
+  grep -q '^treehouse' "$dir/runtime.log" \
+    || fail "released endpoint teardown skipped the worktree return: $(cat "$dir/runtime.log")"
+  assert_absent "$dir/home/state/$id.meta" "released endpoint teardown kept the task record"
+  grep -q 'left untouched' "$dir/stdout" \
+    || fail "released endpoint teardown did not report the untouched endpoint: $(cat "$dir/stdout")"
+  pass "fm-teardown: a released Herdr record is retired and its recorded endpoint is never commanded"
+}
+
 test_supported_backend_endpoint_records_validate() {
   local dir id backend target
   dir=$(make_case valid-backends)
@@ -116,6 +210,19 @@ test_supported_backend_endpoint_records_validate() {
     "window=lab:w1:p2" "endpoint_task_id=$id" "worktree=$dir/worktree" "project=$dir/project" \
     "backend=herdr" "herdr_session=lab" "herdr_workspace_id=w1" "herdr_tab_id=w1:t2" "herdr_pane_id=w1:p2"
   fm_backend_validate_task_endpoint "$dir/home/state/$id.meta" "$id" || fail "valid Herdr endpoint refused"
+  [ "$FM_BACKEND_VALIDATED_ENDPOINT_ACTION" = allowed ] \
+    || fail "a proven Herdr binding did not authorize endpoint action"
+
+  # A released record validates for cleanup but withholds endpoint authority.
+  id=herdr-released-task
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=lab:w1:p2" "endpoint_released=$id" "worktree=$dir/worktree" "project=$dir/project" \
+    "backend=herdr" "herdr_session=lab" "herdr_workspace_id=w1" "herdr_tab_id=w1:t2" "herdr_pane_id=w1:p2"
+  fm_backend_validate_task_endpoint "$dir/home/state/$id.meta" "$id" || fail "released Herdr endpoint refused"
+  [ "$FM_BACKEND_VALIDATED_ENDPOINT_ACTION" = forbidden ] \
+    || fail "a released record still authorized endpoint action"
+  fm_backend_meta_endpoint_action_forbidden "$dir/home/state/$id.meta" \
+    || fail "the released record's endpoint predicate did not forbid endpoint action"
 
   id=zellij-task
   fm_write_meta "$dir/home/state/$id.meta" \
@@ -269,6 +376,9 @@ SH
 }
 
 test_invalid_endpoint_records_refuse_before_mutation
+test_unbound_herdr_endpoint_still_refuses_and_names_the_repair
+test_malformed_release_markers_refuse
+test_released_endpoint_cleans_up_without_touching_the_runtime
 test_supported_backend_endpoint_records_validate
 test_tmux_empty_target_refuses_without_invocation
 test_recorded_process_identity_cleanup_is_exact
