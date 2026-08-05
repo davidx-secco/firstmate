@@ -2480,7 +2480,14 @@ FM_BACKEND_HERDR_COMPOSER_LINES=${FM_BACKEND_HERDR_COMPOSER_LINES:-20}
 # (FM_COMPOSER_IDLE_REGEX_DEFAULT, bin/fm-composer-lib.sh). Extend it THERE when
 # another verified harness needs its own idle placeholder recognized, so the set
 # cannot drift between the backends.
-FM_BACKEND_HERDR_IDLE_RE=${FM_BACKEND_HERDR_IDLE_RE:-$FM_COMPOSER_IDLE_REGEX_DEFAULT}
+# Every reference to a shared composer default below tolerates an unset value on
+# purpose. A partial code root - a remote checkout carrying this adapter without
+# its shared composer owner - must still SOURCE, because bin/fm-remote-doctor.sh
+# loads this adapter specifically to report that host's gaps rather than failing
+# to load. Under `set -u` a bare expansion would abort sourcing instead, and the
+# adapter is unusable in that state anyway because the shared classifier
+# functions are missing with it.
+FM_BACKEND_HERDR_IDLE_RE=${FM_BACKEND_HERDR_IDLE_RE:-${FM_COMPOSER_IDLE_REGEX_DEFAULT:-}}
 # Known bare (unbordered) prompt glyphs a composer row may start with: ❯
 # (claude), › (codex), and → (Cursor Agent). Generic shell-style glyphs > $ % #
 # are still recognized after a bordered composer row has already been structurally
@@ -2501,7 +2508,7 @@ FM_BACKEND_HERDR_BARE_PROMPT_RE=${FM_BACKEND_HERDR_BARE_PROMPT_RE:-'^(❯|›|�
 # composer fallback never re-sends Enter into a live turn. The signature set is
 # the shared one (FM_COMPOSER_BUSY_REGEX_DEFAULT, bin/fm-composer-lib.sh);
 # FM_BUSY_REGEX overrides, same as everywhere else.
-FM_BACKEND_HERDR_BUSY_REGEX_DEFAULT=$FM_COMPOSER_BUSY_REGEX_DEFAULT
+FM_BACKEND_HERDR_BUSY_REGEX_DEFAULT=${FM_COMPOSER_BUSY_REGEX_DEFAULT:-}
 # Pi allows a multi-line composer between its horizontal separators. Bound the
 # structural candidate so two unrelated transcript rules with an arbitrarily
 # large region between them can never be promoted into a composer.

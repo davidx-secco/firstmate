@@ -91,8 +91,8 @@
 # exposes no stable ASCII busy token.
 # Cursor Agent renders its stop hint on the composer row itself while generating
 # (verified 2026.07.20-8cc9c0b); it exposes no separate footer spinner token.
-FM_TMUX_BUSY_REGEX_DEFAULT=$FM_COMPOSER_BUSY_REGEX_DEFAULT
-FM_TMUX_IDLE_REGEX_DEFAULT=$FM_COMPOSER_IDLE_REGEX_DEFAULT
+FM_TMUX_BUSY_REGEX_DEFAULT=${FM_COMPOSER_BUSY_REGEX_DEFAULT:-}
+FM_TMUX_IDLE_REGEX_DEFAULT=${FM_COMPOSER_IDLE_REGEX_DEFAULT:-}
 FM_TMUX_CLAUDE_BUSY_REGEX_DEFAULT='esc to interrupt|…[[:space:]]+\([0-9]+[smh]'
 FM_TMUX_CODEX_BUSY_REGEX_DEFAULT='esc to interrupt'
 FM_TMUX_OPENCODE_BUSY_REGEX_DEFAULT='esc interrupt'

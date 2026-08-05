@@ -494,7 +494,7 @@ test_cursor_maps_effort_to_concrete_model() {
   rec=$(make_spawn_case profile-cursor cursor "$id")
   read_case_record "$rec"
 
-  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --effort xhigh)
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --effort xhigh)
   status=$?
   expect_code 0 "$status" "cursor spawn with xhigh effort should map to the highest verified concrete model"
   assert_meta_profile "$HOME_DIR/state/$id.meta" cursor cursor-grok-4.5-high xhigh
@@ -515,7 +515,7 @@ test_cursor_maps_effort_when_model_is_the_default_sentinel() {
   # model_flag_for_harness treats "default" as no model and emits no flag, and
   # cursor has no effort flag to degrade to, so gating the mapping on MODEL_SET
   # would silently drop the effort axis entirely for this input.
-  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
     --model default --effort xhigh)
   status=$?
   expect_code 0 "$status" "cursor spawn with --model default and xhigh effort should succeed"
@@ -534,7 +534,7 @@ test_cursor_preserves_unrelated_explicit_model() {
   rec=$(make_spawn_case profile-cursor-explicit cursor "$id")
   read_case_record "$rec"
 
-  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
     --model claude-opus-4-8-thinking-high --effort low)
   status=$?
   expect_code 0 "$status" "cursor spawn with an explicit unrelated model should succeed"
@@ -552,7 +552,7 @@ test_cursor_preserves_explicit_in_family_model() {
   rec=$(make_spawn_case profile-cursor-in-family cursor "$id")
   read_case_record "$rec"
 
-  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
     --model cursor-grok-4.5-low --effort high)
   status=$?
   expect_code 0 "$status" "cursor spawn with an explicit in-family model and conflicting effort should succeed"
