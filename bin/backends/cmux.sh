@@ -544,6 +544,9 @@ FM_BACKEND_CMUX_COMPOSER_LINES=${FM_BACKEND_CMUX_COMPOSER_LINES:-20}
 # Idle placeholders and busy stop hints come from the shared composer owner
 # (FM_COMPOSER_{IDLE,BUSY}_REGEX_DEFAULT, bin/fm-composer-lib.sh) so a newly
 # verified harness's signature is added once fleet-wide, not once per backend.
+# Both references tolerate an unset shared default on purpose, so this adapter
+# still SOURCES under `set -u` in a partial code root that carries it without
+# bin/fm-composer-lib.sh (bin/backends/herdr.sh explains why that matters).
 FM_BACKEND_CMUX_IDLE_RE=${FM_BACKEND_CMUX_IDLE_RE:-${FM_COMPOSER_IDLE_REGEX_DEFAULT:-}}
 FM_BACKEND_CMUX_BARE_PROMPT_RE=${FM_BACKEND_CMUX_BARE_PROMPT_RE:-'^→( |$)'}
 FM_BACKEND_CMUX_BUSY_REGEX_DEFAULT=${FM_COMPOSER_BUSY_REGEX_DEFAULT:-}

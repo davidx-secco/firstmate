@@ -91,6 +91,10 @@
 # exposes no stable ASCII busy token.
 # Cursor Agent renders its stop hint on the composer row itself while generating
 # (verified 2026.07.20-8cc9c0b); it exposes no separate footer spinner token.
+# The two shared aliases tolerate an unset shared default on purpose, so this
+# library still SOURCES under `set -u` in a partial code root that carries it
+# without bin/fm-composer-lib.sh (bin/backends/herdr.sh explains why that
+# matters).
 FM_TMUX_BUSY_REGEX_DEFAULT=${FM_COMPOSER_BUSY_REGEX_DEFAULT:-}
 FM_TMUX_IDLE_REGEX_DEFAULT=${FM_COMPOSER_IDLE_REGEX_DEFAULT:-}
 FM_TMUX_CLAUDE_BUSY_REGEX_DEFAULT='esc to interrupt|…[[:space:]]+\([0-9]+[smh]'

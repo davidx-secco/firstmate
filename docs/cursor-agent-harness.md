@@ -40,9 +40,15 @@ The idle composer uses the agent-only `→` glyph with `Add a follow-up` after a
 The shared composer classifier recognizes that glyph and both placeholders without weakening the rule that a bare shell prompt is never safe for injection.
 
 No Cursor per-turn hook is verified.
-Cursor therefore has no entry in `fm_busy_sources_for_harness` and no rendered-tail arm in the classifier, so `fm_busy_classify` returns `unknown` for a cursor task and a generating Cursor pane is never read as busy worker state.
-That matches the posture upstream ships for codex and for standalone kimi before verification.
-A generating Cursor crewmate is consequently never exempted as provably working: the watcher reaches its stale and escalation path on pane-hash stability alone.
+Cursor therefore has no entry in `fm_busy_sources_for_harness`, `fm-spawn.sh` arms no busy record for a cursor task, and the classifier has no cursor rendered-tail arm (the only such arm is Grok's).
+On every backend except herdr, `fm_busy_classify` returns `unknown missing` for a cursor task and no generating Cursor pane is read as busy worker state.
+
+The one exception is herdr, and it is not Cursor-specific: with no record at all, `fm_busy_classify` consults herdr's harness-agnostic native agent state and reports `busy herdr-native` when herdr itself reads the pane as working.
+So a generating Cursor pane on the herdr backend can classify busy through herdr's own detection.
+That is not part of Cursor's verified evidence and nothing here depends on it; an idle or unreadable native answer falls through to `unknown missing`.
+This is where Cursor's posture differs from codex and standalone kimi, which short-circuit to `unknown` for every backend before that arm is reached.
+
+Wherever the verdict is `unknown`, a generating Cursor crewmate is not exempted as provably working: the watcher reaches its stale and escalation path on pane-hash stability alone.
 
 The rendered `ctrl+c to stop` hint still does real work, just not worker classification.
 It feeds the submit-acknowledgement and away-mode delivery guards in `bin/fm-tmux-lib.sh` and the herdr, cmux, and orca composer classifiers.
