@@ -163,19 +163,30 @@ while IFS= read -r line || [ -n "$line" ]; do
 done < "$META"
 printf '%s=%s\n' "$FIELD" "$ID" >> "$META_TMP" || exit 1
 chmod "0$META_MODE" "$META_TMP" || exit 1
+
+# Validate the CANDIDATE before it replaces anything. The structural checks above
+# are weaker than the validator's - they never count worktree=/project= lines and
+# resolve the backend leniently - so a record they pass can still be rejected
+# here. Deciding before the rename is what keeps that harmless: the original
+# record stays byte-identical and the task is no worse off than it was.
+rebind_outcome_authorized() {  # <meta-file>
+  fm_backend_validate_task_endpoint "$1" "$ID" || return 1
+  case "$OUTCOME:$FM_BACKEND_VALIDATED_ENDPOINT_ACTION" in
+    adopt:allowed|release:forbidden) return 0 ;;
+  esac
+  echo "error: record for $ID authorizes '$FM_BACKEND_VALIDATED_ENDPOINT_ACTION', not the $OUTCOME outcome" >&2
+  return 1
+}
+if ! rebind_outcome_authorized "$META_TMP"; then
+  echo "REFUSED: the repaired record for task $ID would not validate; $META is unchanged." >&2
+  exit 1
+fi
+
 mv -f -- "$META_TMP" "$META" || exit 1
 META_TMP=
 
-# Prove the repaired record now validates, and that it authorizes exactly the
-# endpoint action this outcome intended - never more.
-fm_backend_validate_task_endpoint "$META" "$ID" || exit 1
-case "$OUTCOME:$FM_BACKEND_VALIDATED_ENDPOINT_ACTION" in
-  adopt:allowed|release:forbidden) ;;
-  *)
-    echo "error: repaired record for $ID authorizes '$FM_BACKEND_VALIDATED_ENDPOINT_ACTION', not the $OUTCOME outcome" >&2
-    exit 1
-    ;;
-esac
+# Final self-check against the record cleanup will actually read.
+rebind_outcome_authorized "$META" || exit 1
 
 if [ "$OUTCOME" = adopt ]; then
   echo "recorded $FIELD=$ID; task $ID is now retirable and its proven endpoint will be closed by cleanup."

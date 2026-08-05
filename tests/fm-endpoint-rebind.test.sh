@@ -368,6 +368,52 @@ test_out_of_scope_and_malformed_records_refuse() {
   pass "fm-endpoint-rebind: non-Herdr backends and malformed Herdr records refuse without a runtime query"
 }
 
+# The script's own structural pre-checks are weaker than the validator's: they
+# never count worktree=/project= lines and resolve the backend leniently. A
+# record they pass but the validator rejects must still leave the original
+# byte-identical, so the decision has to be made against the candidate before
+# the rename - otherwise the task ends up carrying a marker on a record the
+# repair then refuses to touch again, stuck harder than before.
+test_records_the_validator_alone_rejects_leave_the_original_intact() {
+  local dir
+
+  # No project= line at all. fm_backend_herdr_endpoint_fields_consistent has
+  # nothing to say about it; fm_backend_validate_task_endpoint refuses.
+  dir=$(make_case refuse-missing-project)
+  fm_write_meta "$dir/state/$ID.meta" \
+    "window=lab:w1:p2" "worktree=$dir/wt" \
+    "backend=herdr" "herdr_session=lab" "herdr_workspace_id=w1" \
+    "herdr_tab_id=w1:t2" "herdr_pane_id=w1:p2"
+  pane_absent "$dir"
+  tabs "$dir" '[]'
+  assert_refused_unchanged "$dir" "missing project line" "$ID"
+  [ "$(meta_field_count "$dir" endpoint_released)" = 0 ] \
+    || fail "missing project line: wrote a release marker onto a record that cannot validate"
+
+  # Two backend= lines. fm_backend_of_meta takes the first and sees herdr; the
+  # validator treats the ambiguity as a refusal.
+  dir=$(make_case refuse-duplicate-backend)
+  fm_write_meta "$dir/state/$ID.meta" \
+    "window=lab:w1:p2" "worktree=$dir/wt" "project=$dir/project" \
+    "backend=herdr" "backend=zellij" "herdr_session=lab" "herdr_workspace_id=w1" \
+    "herdr_tab_id=w1:t2" "herdr_pane_id=w1:p2"
+  pane_absent "$dir"
+  tabs "$dir" '[]'
+  assert_refused_unchanged "$dir" "duplicate backend line" "$ID"
+
+  # Two worktree= lines, likewise invisible to every pre-check.
+  dir=$(make_case refuse-duplicate-worktree)
+  fm_write_meta "$dir/state/$ID.meta" \
+    "window=lab:w1:p2" "worktree=$dir/wt" "worktree=$dir/other" "project=$dir/project" \
+    "backend=herdr" "herdr_session=lab" "herdr_workspace_id=w1" \
+    "herdr_tab_id=w1:t2" "herdr_pane_id=w1:p2"
+  pane_absent "$dir"
+  tabs "$dir" '[]'
+  assert_refused_unchanged "$dir" "duplicate worktree line" "$ID"
+
+  pass "fm-endpoint-rebind: a record only the validator rejects refuses with the original untouched"
+}
+
 # The repair adds one field. It must not change the record's permissions as a
 # side effect: bin/fm-pr-check.sh owns the one place meta mode legitimately
 # changes, and a task whose poll is armed must stay private afterwards.
@@ -472,6 +518,7 @@ test_ambiguous_absence_refuses
 test_inconclusive_reads_refuse
 test_records_that_need_no_repair_refuse
 test_out_of_scope_and_malformed_records_refuse
+test_records_the_validator_alone_rejects_leave_the_original_intact
 test_record_permissions_are_preserved
 test_record_without_a_trailing_newline_is_repaired_well_formed
 test_dry_run_writes_nothing

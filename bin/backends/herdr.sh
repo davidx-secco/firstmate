@@ -1750,8 +1750,11 @@ fm_backend_herdr_agent_alive() {  # <target>
 # Both read the CLI with 2>&1 for the reason fm_backend_herdr_pane_agent_state
 # documents at length: real herdr writes an error response's JSON body to
 # STDERR, and these functions need the error.code values themselves.
-# Neither gates on exit status: herdr exits 1 for a well-formed error response
-# (verified against 0.7.5), which is exactly the answer the absence check reads.
+# They differ on exit status, deliberately. The absence reader ignores it,
+# because herdr exits 1 for a well-formed error response (verified against
+# 0.7.5) and that response is exactly the answer it must read. The identity
+# reader aborts on any non-zero exit, because a positive proof only ever comes
+# from a successful call.
 
 # fm_backend_herdr_task_pane_identity_proven: does the live server itself say the
 # recorded pane belongs to <task-id>? Every condition must hold:
