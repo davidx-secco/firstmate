@@ -26,8 +26,10 @@ set -u
 
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found (required by the herdr adapter)"; exit 0; }
 
-# fm_pr_file_mode is the repo's portable file-mode reader.
-# shellcheck source=bin/fm-pr-lib.sh
+# fm_pr_file_mode is the repo's portable file-mode reader. Sourced with
+# source=/dev/null, the convention for every test outside the callback/variable
+# interop suites tests/fm-lint.test.sh allowlists for production source context.
+# shellcheck source=/dev/null
 . "$ROOT/bin/fm-pr-lib.sh"
 
 REBIND="$ROOT/bin/fm-endpoint-rebind.sh"
