@@ -325,7 +325,7 @@ The empirical record is [`docs/cursor-agent-harness.md`](../../../docs/cursor-ag
 | Interrupt | Cursor advertises `Ctrl+C`, but an automated PTY probe did not stop an active stream. Send at most one `Ctrl+C`, re-peek, and if generation continues let the turn settle before redirecting. Never blindly repeat it because an idle first `Ctrl+C` arms process exit. |
 | Resume | `agent --force --trust --workspace <isolated-task-directory> --resume=<chat-id>`, using the id printed at clean exit. `agent --continue` resumes the most recent session for the workspace when the exact id is unavailable. |
 | Skill invocation | Natural-language instruction only; no Cursor-specific skill command is verified. |
-| Turn-end notification | None verified. Ordinary pane hashing, the busy hint, and stable-idle monitoring supervise Cursor workers. |
+| Turn-end notification | No per-turn hook is verified. Cursor has no entry in `fm_busy_sources_for_harness` and no rendered-tail arm, so `fm_busy_classify` returns `unknown` and a generating Cursor pane is never classified busy - the same posture upstream ships for codex and standalone kimi. The rendered `ctrl+c to stop` hint feeds the submit-acknowledgement and away-mode delivery guards plus the composer classifiers, not worker state. |
 | Terminal liveness | Cursor's `agent` launcher reports `node` as tmux's `#{pane_current_command}`. That generic interpreter name is ambiguous - unlike the Pi family, which is exactly attributable through `pi-launcher` - so process-level liveness remains `unknown`; endpoint presence and the composer dead-shell guard remain available. |
 
 For recovery, do not treat one unsuccessful `Ctrl+C` as permission to send a second while the turn is still busy.
