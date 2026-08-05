@@ -166,7 +166,10 @@ The 2026-08-05 legacy-record repair pass added the endpoint-authority half of th
 ```text
 ok - fm-teardown: an unproven Herdr endpoint still refuses under --force and names the sanctioned repair
 ok - fm-teardown: an empty, duplicated, foreign, contradictory, or inconsistent release marker refuses
+ok - fm-teardown: an endpoint release marker on a non-Herdr record refuses before any mutation or runtime call
 ok - fm-teardown: a released Herdr record is retired and its recorded endpoint is never commanded
+ok - fm-teardown: a released Herdr record's presentation journal is removed without any herdr command
+ok - fm-endpoint-rebind: a record with no trailing newline is repaired into a well-formed record
 ok - released Herdr endpoint with unpushed work is refused (landed-work safety unchanged)
 ok - released Herdr endpoint with a dirty worktree is refused (dirty check unchanged)
 ok - released Herdr endpoint with landed work is retired without any herdr command

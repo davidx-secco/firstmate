@@ -166,6 +166,50 @@ test_malformed_release_markers_refuse() {
   pass "fm-teardown: an empty, duplicated, foreign, contradictory, or inconsistent release marker refuses"
 }
 
+# The marker is written only from Herdr's empirically verified live identity
+# surface, so on any other backend it can only be hand-written. Honoring it there
+# would retire the record while leaving a live window running untracked, so the
+# validator refuses before any mutation or runtime call.
+test_release_marker_on_a_non_herdr_backend_refuses() {
+  local dir id=endpoint-foreign-release
+
+  dir=$(make_case release-tmux)
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=isolated:fm-$id" "worktree=$dir/worktree" "project=$dir/project" \
+    "kind=scout" "mode=no-mistakes" "backend=tmux" "endpoint_released=$id"
+  assert_refused_without_mutation "$dir" "$id" "release marker on a tmux record"
+  grep -q 'no verified release path' "$dir/stderr" \
+    || fail "release marker on a tmux record: refusal lost its reason: $(cat "$dir/stderr")"
+
+  dir=$(make_case release-zellij)
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=lab:2" "worktree=$dir/worktree" "project=$dir/project" \
+    "kind=scout" "mode=no-mistakes" "backend=zellij" "zellij_session=lab" \
+    "zellij_tab_id=1" "zellij_pane_id=2" "endpoint_released=$id"
+  assert_refused_without_mutation "$dir" "$id" "release marker on a Zellij record"
+
+  pass "fm-teardown: an endpoint release marker on a non-Herdr record refuses before any mutation or runtime call"
+}
+
+# A released record's meta is removed, so its presentation journal could never be
+# associated with a task again. It is retired as ordinary volatile state, by a
+# plain file removal that issues no herdr command of any kind.
+test_released_record_retires_its_presentation_journal() {
+  local dir id=endpoint-released-journal
+  dir=$(make_case release-presentation)
+  write_legacy_herdr_meta "$dir" "$id" "endpoint_released=$id"
+  printf 'workspace_id=w1\npane_id=w1:p2\n' > "$dir/home/state/$id.herdr-presentation"
+
+  run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "released presentation teardown failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/$id.herdr-presentation" \
+    "released presentation teardown left its journal behind forever"
+  assert_absent "$dir/home/state/$id.meta" "released presentation teardown kept the task record"
+  grep -q '^herdr' "$dir/runtime.log" \
+    && fail "released presentation teardown commanded herdr: $(cat "$dir/runtime.log")"
+  pass "fm-teardown: a released Herdr record's presentation journal is removed without any herdr command"
+}
+
 # The release outcome's whole promise: cleanup completes without commanding the
 # runtime endpoint even once.
 test_released_endpoint_cleans_up_without_touching_the_runtime() {
@@ -378,6 +422,8 @@ SH
 test_invalid_endpoint_records_refuse_before_mutation
 test_unbound_herdr_endpoint_still_refuses_and_names_the_repair
 test_malformed_release_markers_refuse
+test_release_marker_on_a_non_herdr_backend_refuses
+test_released_record_retires_its_presentation_journal
 test_released_endpoint_cleans_up_without_touching_the_runtime
 test_supported_backend_endpoint_records_validate
 test_tmux_empty_target_refuses_without_invocation

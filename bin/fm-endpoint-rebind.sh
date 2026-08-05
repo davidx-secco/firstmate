@@ -35,9 +35,13 @@
 #
 # WHAT THIS IS NOT. There is no --force, no override flag, and no environment
 # escape. Anything short of one of the two proofs above - a live pane whose label
-# or tab disagrees, a pane that exists with no agent, an unreachable server, a
-# non-JSON or unparseable answer, ambiguous metadata, a non-Herdr backend, or a
-# record that already carries a binding - refuses and changes nothing. Nor does
+# or tab disagrees, an unreachable server, a non-JSON or unparseable answer,
+# ambiguous metadata, a non-Herdr backend, or a record that already carries a
+# binding - refuses and changes nothing. Agent state is deliberately not
+# consulted: what adopt proves is the recorded pane's IDENTITY, not its
+# liveness, so a pane with no registered agent is adopted like any other once
+# the recorded pane, tab, and workspace agree and that tab's live label is
+# fm-<task-id> on a single-pane tab. Nor does
 # a proof of absence license closing the recorded address anyway: the pane id can
 # be reallocated between this read and any later command, which is exactly the
 # hazard the original refusal exists to prevent.
@@ -97,7 +101,9 @@ if grep -q '^endpoint_released=' "$META"; then
 fi
 
 # Require the same structural consistency ordinary cleanup requires, so a repair
-# can never bless a record teardown would still reject for another reason.
+# can never bless a record teardown would still reject for another reason. The
+# field-consistency predicate below is the validator's own, shared rather than
+# restated so the two can never drift apart.
 meta_field() {  # <key>
   fm_backend_meta_exact_value "$META" "$1" || return 1
 }
@@ -106,12 +112,7 @@ SESSION=$(meta_field herdr_session) || SESSION=
 WORKSPACE=$(meta_field herdr_workspace_id) || WORKSPACE=
 TAB=$(meta_field herdr_tab_id) || TAB=
 PANE=$(meta_field herdr_pane_id) || PANE=
-if [ -z "$SESSION" ] || [ -z "$WORKSPACE" ] || [ -z "$TAB" ] || [ -z "$PANE" ] \
-  || [ "$WINDOW" != "$SESSION:$PANE" ] \
-  || ! fm_backend_endpoint_atom_valid "$SESSION" \
-  || ! fm_backend_endpoint_atom_valid "$WORKSPACE" \
-  || ! fm_backend_endpoint_atom_valid "${TAB//:/_}" \
-  || ! fm_backend_endpoint_atom_valid "${PANE//:/_}"; then
+if ! fm_backend_herdr_endpoint_fields_consistent "$WINDOW" "$SESSION" "$WORKSPACE" "$TAB" "$PANE"; then
   echo "REFUSED: Herdr endpoint metadata for task $ID is malformed or inconsistent; nothing to repair." >&2
   exit 1
 fi
@@ -154,7 +155,12 @@ rebind_cleanup() { [ -z "$META_TMP" ] || rm -f -- "$META_TMP"; }
 trap rebind_cleanup EXIT
 trap 'exit 1' HUP INT TERM
 META_TMP=$(mktemp "$STATE/.fm-rebind-meta.XXXXXX") || exit 1
-cat -- "$META" > "$META_TMP" || exit 1
+# Copy line by line rather than byte for byte, the way bin/fm-pr-check.sh does:
+# a record whose final line has no newline would otherwise have the new field
+# glued onto it, destroying that line and the repair in one write.
+while IFS= read -r line || [ -n "$line" ]; do
+  printf '%s\n' "$line" >> "$META_TMP" || exit 1
+done < "$META"
 printf '%s=%s\n' "$FIELD" "$ID" >> "$META_TMP" || exit 1
 chmod "0$META_MODE" "$META_TMP" || exit 1
 mv -f -- "$META_TMP" "$META" || exit 1

@@ -385,6 +385,33 @@ test_record_permissions_are_preserved() {
   pass "fm-endpoint-rebind: the repaired record keeps the permissions it had"
 }
 
+# A record whose final line has no newline must not have the new field glued onto
+# it: that would destroy the last field and the repair in the same write, and the
+# only copy of the record is already gone by then.
+test_record_without_a_trailing_newline_is_repaired_well_formed() {
+  local dir
+  dir=$(make_case no-trailing-newline)
+  write_legacy_meta "$dir"
+  printf '%s' "$(cat "$dir/state/$ID.meta")" > "$dir/state/$ID.meta.trimmed"
+  mv "$dir/state/$ID.meta.trimmed" "$dir/state/$ID.meta"
+  [ -n "$(tail -c 1 "$dir/state/$ID.meta")" ] \
+    || fail "no-trailing-newline: fixture still ends with a newline"
+  pane_absent "$dir"
+  tabs "$dir" '[]'
+
+  run_rebind "$dir" "$ID" >/dev/null 2> "$dir/stderr" \
+    || fail "no-trailing-newline: repair refused: $(cat "$dir/stderr")"
+  [ "$(meta_field_count "$dir" endpoint_released)" = 1 ] \
+    || fail "no-trailing-newline: did not record exactly one endpoint_released"
+  [ "$(meta_field_value "$dir" endpoint_released)" = "$ID" ] \
+    || fail "no-trailing-newline: recorded marker does not name the task"
+  [ "$(meta_field_count "$dir" herdr_pane_id)" = 1 ] \
+    || fail "no-trailing-newline: the record's last field did not survive the repair"
+  [ "$(meta_field_value "$dir" herdr_pane_id)" = "w1:p2" ] \
+    || fail "no-trailing-newline: the record's last field was corrupted by the append"
+  pass "fm-endpoint-rebind: a record with no trailing newline is repaired into a well-formed record"
+}
+
 test_dry_run_writes_nothing() {
   local dir
   dir=$(make_case dry-run)
@@ -444,5 +471,6 @@ test_inconclusive_reads_refuse
 test_records_that_need_no_repair_refuse
 test_out_of_scope_and_malformed_records_refuse
 test_record_permissions_are_preserved
+test_record_without_a_trailing_newline_is_repaired_well_formed
 test_dry_run_writes_nothing
 test_no_forcing_path_exists

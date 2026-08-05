@@ -377,12 +377,29 @@ fm_backend_endpoint_atom_valid() {  # <value>
   esac
 }
 
+# fm_backend_herdr_endpoint_fields_consistent: the one structural check a Herdr
+# cleanup record must pass, shared by fm_backend_validate_task_endpoint and
+# bin/fm-endpoint-rebind.sh so the repair can never bless a record teardown
+# would still reject. Returns 1 silently; each caller owns its own refusal.
+fm_backend_herdr_endpoint_fields_consistent() {  # <window> <session> <workspace> <tab> <pane>
+  local window=$1 session=$2 workspace=$3 tab=$4 pane=$5
+  [ -n "$session" ] && [ -n "$workspace" ] && [ -n "$tab" ] && [ -n "$pane" ] || return 1
+  [ "$window" = "$session:$pane" ] || return 1
+  fm_backend_endpoint_atom_valid "$session" || return 1
+  fm_backend_endpoint_atom_valid "$workspace" || return 1
+  fm_backend_endpoint_atom_valid "${tab//:/_}" || return 1
+  fm_backend_endpoint_atom_valid "${pane//:/_}" || return 1
+  return 0
+}
+
 # fm_backend_meta_endpoint_action_forbidden: 0 when <meta-file> carries ANY
 # endpoint_released= line, so no runtime endpoint command may be issued for that
 # task. Deliberately a presence test rather than a value test: an unreadable,
-# duplicated, or mismatched marker must still forbid endpoint action here, and
+# duplicated, or mismatched marker must still forbid endpoint action here.
 # fm_backend_validate_task_endpoint - which every cleanup entry point runs
-# first - is the one owner of refusing such a record outright.
+# first - is the one owner of the marker's scope: it refuses such a record
+# outright, and it is also where the marker's Herdr-only restriction lives, so
+# a marker on any other backend never reaches a caller of this predicate.
 fm_backend_meta_endpoint_action_forbidden() {  # <meta-file>
   local meta=$1
   [ -f "$meta" ] || return 1
@@ -491,6 +508,14 @@ fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
     echo "REFUSED: task $id records both an endpoint binding and a release marker; preserving task state." >&2
     return 1
   fi
+  # The marker is only ever written from Herdr's empirically verified live
+  # identity surface, so on any other backend it can only be hand-written.
+  # Refusing is the fail-closed answer: silently ignoring it would let a record
+  # be retired while its live endpoint kept running untracked.
+  if [ "$released_count" -ne 0 ] && [ "$backend" != herdr ]; then
+    echo "REFUSED: task $id records an endpoint release marker on backend $backend, which has no verified release path; preserving task state." >&2
+    return 1
+  fi
 
   case "$backend" in
     tmux)
@@ -512,12 +537,8 @@ fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
       workspace=$(fm_backend_meta_exact_value "$meta" herdr_workspace_id) || workspace=
       tab=$(fm_backend_meta_exact_value "$meta" herdr_tab_id) || tab=
       pane=$(fm_backend_meta_exact_value "$meta" herdr_pane_id) || pane=
-      if [ -z "$recorded_session" ] || [ -z "$workspace" ] || [ -z "$tab" ] || [ -z "$pane" ] \
-        || [ "$window" != "$recorded_session:$pane" ] \
-        || ! fm_backend_endpoint_atom_valid "$recorded_session" \
-        || ! fm_backend_endpoint_atom_valid "$workspace" \
-        || ! fm_backend_endpoint_atom_valid "${tab//:/_}" \
-        || ! fm_backend_endpoint_atom_valid "${pane//:/_}"; then
+      if ! fm_backend_herdr_endpoint_fields_consistent \
+        "$window" "$recorded_session" "$workspace" "$tab" "$pane"; then
         echo "REFUSED: Herdr endpoint metadata for task $id is malformed or inconsistent; preserving task state." >&2
         return 1
       fi

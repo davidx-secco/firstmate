@@ -2321,6 +2321,13 @@ if [ "$HERDR_PRESENTATION_RETIRE_CANDIDATE" = 1 ]; then
   else
     echo "warning: exact herdr task-pane close could not be confirmed for $ID; retaining the presentation journal and attempting no workspace cleanup" >&2
   fi
+elif [ "$BACKEND" = herdr ] && [ "$ENDPOINT_ACTION" != allowed ] \
+     && { [ -e "$HERDR_PRESENTATION_JOURNAL" ] || [ -L "$HERDR_PRESENTATION_JOURNAL" ]; }; then
+  # A released record's meta is removed below, so nothing could ever associate
+  # this journal with a task again. Remove it as ordinary volatile state: a
+  # plain file removal, never a projection close, workspace close, or pane
+  # close, because this record's endpoint identity is unproven by definition.
+  rm -f "$HERDR_PRESENTATION_JOURNAL"
 elif [ "$BACKEND" = herdr ] \
      && { [ -e "$HERDR_PRESENTATION_JOURNAL" ] || [ -L "$HERDR_PRESENTATION_JOURNAL" ]; }; then
   echo "warning: herdr presentation journal for $ID remains quarantined; no workspace cleanup was attempted" >&2
