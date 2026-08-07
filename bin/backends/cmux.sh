@@ -501,14 +501,12 @@ fm_backend_cmux_send_key() {  # <target> <key> [expected-label]
   fm_backend_cmux_cli send-key --workspace "$FM_BACKEND_CMUX_WORKSPACE" --surface "$FM_BACKEND_CMUX_SURFACE" "$key" >/dev/null 2>&1
 }
 
-# fm_backend_cmux_send_text_line: send one line of TEXT then submit. cmux has
-# no single-call atomic "run and submit" primitive (like herdr's `pane run`),
-# so this composes send (literal) + send-key enter, exactly like zellij's
-# equivalent - used for the fixed spawn-time commands (treehouse get, the
-# GOTMPDIR export).
+# fm_backend_cmux_send_text_line: send one line of TEXT then submit.
 fm_backend_cmux_send_text_line() {  # <target> <text> [expected-label]
   fm_backend_cmux_send_literal "$1" "$2" "${3:-}" || return 1
-  fm_backend_cmux_send_key "$1" Enter "${3:-}"
+  fm_backend_cmux_send_key "$1" Enter "${3:-}" && return 0
+  fm_backend_cmux_send_key "$1" C-c "${3:-}" >/dev/null 2>&1 && return 1
+  return 2
 }
 
 # fm_backend_cmux_capture: bounded plain-text surface capture. No herdr-style
@@ -546,9 +544,12 @@ FM_BACKEND_CMUX_COMPOSER_LINES=${FM_BACKEND_CMUX_COMPOSER_LINES:-20}
 # Idle placeholders and busy stop hints come from the shared composer owner
 # (FM_COMPOSER_{IDLE,BUSY}_REGEX_DEFAULT, bin/fm-composer-lib.sh) so a newly
 # verified harness's signature is added once fleet-wide, not once per backend.
-FM_BACKEND_CMUX_IDLE_RE=${FM_BACKEND_CMUX_IDLE_RE:-$FM_COMPOSER_IDLE_REGEX_DEFAULT}
+# Both references tolerate an unset shared default on purpose, so this adapter
+# still SOURCES under `set -u` in a partial code root that carries it without
+# bin/fm-composer-lib.sh (bin/backends/herdr.sh explains why that matters).
+FM_BACKEND_CMUX_IDLE_RE=${FM_BACKEND_CMUX_IDLE_RE:-${FM_COMPOSER_IDLE_REGEX_DEFAULT:-}}
 FM_BACKEND_CMUX_BARE_PROMPT_RE=${FM_BACKEND_CMUX_BARE_PROMPT_RE:-'^→( |$)'}
-FM_BACKEND_CMUX_BUSY_REGEX_DEFAULT=$FM_COMPOSER_BUSY_REGEX_DEFAULT
+FM_BACKEND_CMUX_BUSY_REGEX_DEFAULT=${FM_COMPOSER_BUSY_REGEX_DEFAULT:-}
 
 fm_backend_cmux_composer_state() {  # <target> [expected-label] -> empty|pending|unknown
   local target=$1 expected_label=${2:-} cap line trimmed stripped="" found=0 bordered=0

@@ -52,7 +52,8 @@ Exact command flags and response parsing are owned by `bin/backends/orca.sh` and
 `fm-send.sh` types and verifies composer clearance, follows `oldestCursor` when Orca returns a limited page, and retries Enter without retyping when a slash popup first fills an argument placeholder.
 Besides a bordered composer row, it accepts an unbordered row starting with Cursor Agent's `→` glyph specifically, and reads a busy stop hint on the found row as a landed submit.
 A bare shell row is `unknown`, not an empty agent composer; the generic `❯` and `›` glyphs are not accepted unbordered.
-The watcher has no native Orca busy signal and uses the shared terminal-tail fallback.
+The watcher has no native Orca busy signal, so each harness adapter's semantic lifecycle supplies worker state.
+Grok alone retains its isolated rendered-tail fallback.
 
 Cleanup keeps all shared Firstmate safety checks.
 A scout still requires its report and completed decision inventory.

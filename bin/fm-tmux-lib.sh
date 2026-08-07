@@ -46,8 +46,14 @@
 # tmux adapter does not paper over a herdr-specific shape.
 #
 # Overrides: FM_COMPOSER_IDLE_RE matches an empty composer after ghost and
-# structural border stripping. FM_BUSY_REGEX globally overrides harness-scoped
-# busy-footer matching (mirrors fm-watch.sh / the daemon).
+# structural border stripping. FM_BUSY_REGEX overrides the rendered busy-footer
+# matching used here.
+#
+# NOT a task-state source: task busy state is owned by bin/fm-busy-lib.sh's
+# semantic contract. The matching below serves only delivery guards: the submit
+# acknowledgement and the away-mode supervisor-pane busy guard. Both ask about
+# the pane receiving input, not the state of a recorded worker task. Matching
+# stays harness-scoped so one harness's output cannot make another read busy.
 #
 # All functions are `set -u` and `set -e` safe (guarded tmux calls, explicit
 # returns) so they can be sourced into either context.
@@ -60,7 +66,7 @@
 # shellcheck source=bin/fm-composer-lib.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/fm-composer-lib.sh"
 
-# Busy footers per harness (mirror fm-watch.sh). claude/codex: "esc to
+# Delivery-only rendered busy footers per harness. claude/codex: "esc to
 # interrupt"; opencode: "esc interrupt"; pi: "Working..."; grok: "Ctrl+c:cancel";
 # Cursor Agent: "ctrl+c to stop".
 # The UNSCOPED fallback and the idle placeholder set stay aliases of the shared
@@ -85,8 +91,12 @@
 # exposes no stable ASCII busy token.
 # Cursor Agent renders its stop hint on the composer row itself while generating
 # (verified 2026.07.20-8cc9c0b); it exposes no separate footer spinner token.
-FM_TMUX_BUSY_REGEX_DEFAULT=$FM_COMPOSER_BUSY_REGEX_DEFAULT
-FM_TMUX_IDLE_REGEX_DEFAULT=$FM_COMPOSER_IDLE_REGEX_DEFAULT
+# The two shared aliases tolerate an unset shared default on purpose, so this
+# library still SOURCES under `set -u` in a partial code root that carries it
+# without bin/fm-composer-lib.sh (bin/backends/herdr.sh explains why that
+# matters).
+FM_TMUX_BUSY_REGEX_DEFAULT=${FM_COMPOSER_BUSY_REGEX_DEFAULT:-}
+FM_TMUX_IDLE_REGEX_DEFAULT=${FM_COMPOSER_IDLE_REGEX_DEFAULT:-}
 FM_TMUX_CLAUDE_BUSY_REGEX_DEFAULT='esc to interrupt|…[[:space:]]+\([0-9]+[smh]'
 FM_TMUX_CODEX_BUSY_REGEX_DEFAULT='esc to interrupt'
 FM_TMUX_OPENCODE_BUSY_REGEX_DEFAULT='esc interrupt'
