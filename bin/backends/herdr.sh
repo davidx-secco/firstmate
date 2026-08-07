@@ -1739,6 +1739,89 @@ fm_backend_herdr_agent_alive() {  # <target>
   esac
 }
 
+# The two legacy-record evidence readers below exist for bin/fm-endpoint-rebind.sh,
+# which repairs a task whose metadata predates fm-spawn.sh stamping
+# endpoint_task_id=. Neither reader ever consults that field: each re-derives the
+# same fact from live server answers, so a hand-written binding cannot satisfy
+# either one. Both are fail-safe toward refusal - an error response, an
+# unparseable body, a missing field, or any mismatch returns 1 - because an
+# inconclusive read must never license adopting or releasing an endpoint.
+#
+# Both read the CLI with 2>&1 for the reason fm_backend_herdr_pane_agent_state
+# documents at length: real herdr writes an error response's JSON body to
+# STDERR, and these functions need the error.code values themselves.
+# They differ on exit status, deliberately. The absence reader ignores it,
+# because herdr exits 1 for a well-formed error response (verified against
+# 0.7.5) and that response is exactly the answer it must read. The identity
+# reader aborts on any non-zero exit, because a positive proof only ever comes
+# from a successful call.
+
+# fm_backend_herdr_task_pane_identity_proven: does the live server itself say the
+# recorded pane belongs to <task-id>? Every condition must hold:
+#   1. `pane get <pane>` succeeds and echoes back pane_id, tab_id, and
+#      workspace_id exactly equal to the recorded pane, tab, and workspace.
+#   2. `tab list --workspace <workspace>` reports exactly one tab with that
+#      tab_id, its label is exactly `fm-<task-id>` - the label fm-spawn.sh sets
+#      as $W when it creates the task tab - and its pane_count is 1, so the
+#      label names that one pane and no other.
+# Together those two answers bind the recorded pane to the task through a label
+# firstmate itself wrote at spawn and the runtime still reports.
+fm_backend_herdr_task_pane_identity_proven() {  # <session> <workspace> <tab> <pane> <task-id>
+  local session=$1 workspace=$2 tab=$3 pane=$4 id=$5 out matches
+  [ -n "$session" ] && [ -n "$workspace" ] && [ -n "$tab" ] && [ -n "$pane" ] && [ -n "$id" ] || return 1
+  out=$(fm_backend_herdr_cli "$session" pane get "$pane" 2>&1) || return 1
+  printf '%s' "$out" | jq -e --arg p "$pane" --arg t "$tab" --arg w "$workspace" \
+    '(.error | not) and (.result.pane.pane_id == $p) and (.result.pane.tab_id == $t)
+       and (.result.pane.workspace_id == $w)' >/dev/null 2>&1 || return 1
+  out=$(fm_backend_herdr_cli "$session" tab list --workspace "$workspace" 2>&1) || return 1
+  matches=$(printf '%s' "$out" | jq --arg t "$tab" \
+    '[.result.tabs[]? | select(.tab_id == $t)] | length' 2>/dev/null) || return 1
+  [ "$matches" = 1 ] || return 1
+  printf '%s' "$out" | jq -e --arg t "$tab" --arg l "fm-$id" \
+    '(.error | not) and (.result.tabs[] | select(.tab_id == $t)
+       | (.label == $l) and (.pane_count == 1))' >/dev/null 2>&1 || return 1
+  return 0
+}
+
+# fm_backend_herdr_task_endpoint_absent: does the live server itself say this
+# task has NO endpoint at its recorded address? Both answers must be positive
+# server responses, so an unreachable server or a non-JSON failure refuses
+# rather than reporting absence:
+#   1. `pane get <pane>` answers error.code = pane_not_found - nothing exists at
+#      the recorded address, so no endpoint command is needed to retire it.
+#   2. The recorded workspace answers either `tab list` with neither a tab
+#      labeled `fm-<task-id>` nor a tab at the recorded tab id, or
+#      error.code = workspace_not_found (the whole workspace is gone, which
+#      subsumes its tabs and panes).
+# Condition 2 is what separates "that address is empty" from "this task has no
+# endpoint here". A surviving tab labeled `fm-<task-id>` means the task does own
+# a pane in that workspace, just not the recorded one, and releasing the record
+# would abandon it. A surviving tab at the recorded tab id whose recorded pane is
+# gone is equally ambiguous, since herdr closes a tab with its last pane, so that
+# id now names either a multi-pane tab or a reused counter. Both refuse for
+# inspection instead.
+#
+# Absence is deliberately NOT treated as authorization to issue a close against
+# the recorded address anyway. Herdr pane ids are short reused counters, so the
+# address can be reallocated between this read and any later command; the caller
+# must retire the record without touching the endpoint at all.
+fm_backend_herdr_task_endpoint_absent() {  # <session> <workspace> <tab> <pane> <task-id>
+  local session=$1 workspace=$2 tab=$3 pane=$4 id=$5 out code
+  [ -n "$session" ] && [ -n "$workspace" ] && [ -n "$tab" ] && [ -n "$pane" ] && [ -n "$id" ] || return 1
+  out=$(fm_backend_herdr_cli "$session" pane get "$pane" 2>&1)
+  code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
+  [ "$code" = pane_not_found ] || return 1
+  out=$(fm_backend_herdr_cli "$session" tab list --workspace "$workspace" 2>&1)
+  code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
+  [ "$code" = workspace_not_found ] && return 0
+  [ -z "$code" ] || return 1
+  printf '%s' "$out" | jq -e --arg l "fm-$id" --arg t "$tab" \
+    '(.result.tabs | type == "array")
+       and ([.result.tabs[] | select(.label == $l or .tab_id == $t)] | length == 0)' \
+    >/dev/null 2>&1 || return 1
+  return 0
+}
+
 # fm_backend_herdr_create_task: create the task's tab (one pane) in
 # <container> ("session:workspace_id"). Herdr does NOT enforce label
 # uniqueness itself (verified: two tabs can share a label), so the duplicate

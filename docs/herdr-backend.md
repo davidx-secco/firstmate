@@ -188,6 +188,13 @@ A Herdr pane id contains a colon, so the adapter splits `window=` on the first c
 The recorded pane is the operational fast path.
 Workspace and tab ids support verification and cleanup but are not inferred from mutable labels during normal operation.
 
+Cleanup additionally requires the `endpoint_task_id=` binding that [`configuration.md`](configuration.md) owns, because a pane id encodes no task and the pane namespace is shared across homes.
+A task recorded before that binding existed is repaired by `bin/fm-endpoint-rebind.sh`, whose two evidence readers live in `bin/backends/herdr.sh` and own their exact conditions.
+Its identity proof reads the `fm-<id>` tab label, which does not relax the rule above: it starts from the recorded workspace, tab, and pane and requires the live label to confirm them, never selecting a target by scanning labels the way [Default-tab prune safety](#default-tab-prune-safety) forbids.
+When that proof fails and the recorded pane is instead provably absent, the repair records `endpoint_released=` so cleanup retires the task while issuing no endpoint command, because a pane id is a short reused counter and absence now is no promise about the address later.
+That marker is scoped to Herdr records, the only backend whose live identity surface was verified here, and teardown refuses a record carrying one on any other backend.
+A released record's presentation journal is deleted as ordinary volatile state rather than quarantined, since its task record is going away and nothing could associate the journal with a task afterwards; the deletion is a plain file removal and never enters the projection close path.
+
 ## Current transport behavior
 
 The adapter starts and polls a named server before workspace, tab, pane, or agent calls.
@@ -307,6 +314,7 @@ Tests use thin compatibility wrappers in `tests/herdr-test-safety.sh` and never 
 ```sh
 tests/fm-backend-herdr.test.sh
 tests/fm-backend-herdr-smoke.test.sh
+tests/fm-endpoint-rebind.test.sh
 tests/fm-backend-herdr-prune-safety-e2e.test.sh
 tests/fm-backend-herdr-respawn-idem-e2e.test.sh
 tests/fm-backend-herdr-workspace-per-home-e2e.test.sh

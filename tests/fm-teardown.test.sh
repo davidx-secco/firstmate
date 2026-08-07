@@ -39,6 +39,12 @@
 #   (p) fm-pr-check when local HEAD lags                        -> record remote PR head
 #   (q) no-mistakes + NO pr= recorded, PR discovered by branch  -> ALLOW  (yolo/no-CI merge)
 #
+# A released Herdr endpoint (bin/fm-endpoint-rebind.sh) withholds endpoint
+# authority and nothing else, so it faces the same matrix:
+#   (z)  released endpoint + truly unpushed work               -> REFUSE (safety holds)
+#   (aa) released endpoint + dirty worktree                    -> REFUSE (dirty wins)
+#   (ab) released endpoint + work pushed to origin             -> ALLOW, no herdr call
+#
 # Also covers backlog teardown-lock-race: a git index.lock left in the worktree by a
 # killed crew process (bin/fm-teardown.sh's teardown_treehouse_return).
 #   (r) provably-stale index.lock (old mtime, no live holder) -> lock removed, ALLOW
@@ -1326,6 +1332,109 @@ test_teardown_missing_busy_sidecar_completes() {
   pass "teardown completes when an exact busy-state sidecar is already absent"
 }
 
+# A released Herdr record (bin/fm-endpoint-rebind.sh's outcome for a task whose
+# recorded endpoint provably no longer exists) withholds endpoint authority and
+# NOTHING else. These cases prove it is still subject to every landed-work
+# refusal, which is what keeps the repair from becoming a way around them.
+write_released_herdr_meta() {  # <case-dir> <mode>
+  local case_dir=$1 mode=$2
+  fm_write_meta "$case_dir/state/task-x1.meta" \
+    "window=default:wR:pR" \
+    "endpoint_released=task-x1" \
+    "worktree=$case_dir/wt" \
+    "project=$case_dir/project" \
+    "kind=ship" \
+    "mode=$mode" \
+    "backend=herdr" \
+    "herdr_session=default" \
+    "herdr_workspace_id=wR" \
+    "herdr_tab_id=wR:tR" \
+    "herdr_pane_id=wR:pR"
+  cat > "$case_dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FM_FAKE_HERDR_LOG:?}"
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/herdr"
+  : > "$case_dir/herdr.log"
+}
+
+run_released_teardown() {  # <case-dir> [args...]
+  local case_dir=$1
+  shift
+  FM_FAKE_HERDR_LOG="$case_dir/herdr.log" run_teardown "$case_dir" "$@"
+}
+
+test_released_endpoint_with_unpushed_work_refuses() {
+  local case_dir rc head
+  case_dir=$(make_case released-unpushed)
+  write_released_herdr_meta "$case_dir" no-mistakes
+  # Real content, unpushed, no PR, never on origin/main: genuinely unlanded, the
+  # same shape test_no_mistakes_truly_unpushed_refuses uses.
+  wt_commit_file "$case_dir" feature.txt hello "unlanded work behind a released endpoint"
+  head=$(git -C "$case_dir/wt" rev-parse HEAD)
+
+  set +e
+  run_released_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "released-unpushed: teardown should refuse unlanded work"
+  grep -q REFUSED "$case_dir/stderr" || fail "released-unpushed: no REFUSED line in stderr"
+  # The commit, the branch, and the worktree all survive the refusal.
+  [ "$(git -C "$case_dir/wt" rev-parse HEAD)" = "$head" ] \
+    || fail "released-unpushed: refusal moved the worktree HEAD"
+  assert_present "$case_dir/state/task-x1.meta" "released-unpushed: refusal removed the task record"
+  [ ! -s "$case_dir/herdr.log" ] \
+    || fail "released-unpushed: refusal commanded herdr: $(cat "$case_dir/herdr.log")"
+  pass "released Herdr endpoint with unpushed work is refused (landed-work safety unchanged)"
+}
+
+test_released_endpoint_with_dirty_worktree_refuses() {
+  local case_dir rc
+  case_dir=$(make_case released-dirty)
+  write_released_herdr_meta "$case_dir" no-mistakes
+  wt_commit "$case_dir" "landed work"
+  git -C "$case_dir/wt" push -q origin fm/task-x1
+  git -C "$case_dir/project" fetch -q origin
+  printf 'uncommitted\n' > "$case_dir/wt/scratch.txt"
+
+  set +e
+  run_released_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "released-dirty: teardown should refuse a dirty worktree"
+  grep -q REFUSED "$case_dir/stderr" || fail "released-dirty: no REFUSED line in stderr"
+  assert_present "$case_dir/wt/scratch.txt" "released-dirty: refusal discarded uncommitted work"
+  [ ! -s "$case_dir/herdr.log" ] \
+    || fail "released-dirty: refusal commanded herdr: $(cat "$case_dir/herdr.log")"
+  pass "released Herdr endpoint with a dirty worktree is refused (dirty check unchanged)"
+}
+
+test_released_endpoint_with_landed_work_allows_without_touching_herdr() {
+  local case_dir rc
+  case_dir=$(make_case released-landed)
+  write_released_herdr_meta "$case_dir" no-mistakes
+  wt_commit "$case_dir" "landed work"
+  git -C "$case_dir/wt" push -q origin fm/task-x1
+  git -C "$case_dir/project" fetch -q origin
+
+  set +e
+  run_released_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 0 "$rc" "released-landed: teardown should succeed once work has landed"
+  ! grep -q REFUSED "$case_dir/stderr" || fail "released-landed: teardown printed a REFUSED line"
+  [ ! -s "$case_dir/herdr.log" ] \
+    || fail "released-landed: teardown commanded herdr: $(cat "$case_dir/herdr.log")"
+  assert_absent "$case_dir/state/task-x1.meta" "released-landed: teardown kept the task record"
+  grep -q 'left untouched' "$case_dir/stdout" \
+    || fail "released-landed: teardown did not report the untouched endpoint: $(cat "$case_dir/stdout")"
+  pass "released Herdr endpoint with landed work is retired without any herdr command"
+}
+
 test_herdr_teardown_clears_escalation_marker() {
   local case_dir marker
   case_dir=$(make_case herdr-marker-cleanup)
@@ -2484,6 +2593,9 @@ test_no_mistakes_origin_remote_allows
 test_no_mistakes_truly_unpushed_refuses
 test_local_only_force_overrides_unpushed
 test_teardown_missing_busy_sidecar_completes
+test_released_endpoint_with_unpushed_work_refuses
+test_released_endpoint_with_dirty_worktree_refuses
+test_released_endpoint_with_landed_work_allows_without_touching_herdr
 test_herdr_teardown_clears_escalation_marker
 test_herdr_flat_teardown_refuses_orphaning_records_then_retry_completes
 test_herdr_flat_teardown_refuses_records_on_unparseable_presence

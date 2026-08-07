@@ -144,6 +144,7 @@ The cleanup identity boundary was validated on 2026-07-28 with tmux 3.6a and met
 ```sh
 tests/fm-teardown-endpoint-safety.test.sh
 tests/fm-teardown.test.sh
+tests/fm-endpoint-rebind.test.sh
 tests/fm-backend-herdr.test.sh
 tests/fm-backend-zellij.test.sh
 tests/fm-backend-orca.test.sh
@@ -159,6 +160,23 @@ ok - tmux backend: direct empty target returns nonzero without invoking tmux
 ok - process cleanup: creation-time PID identity removes only the exact child and preserves the control child
 ok - fm-teardown: dedicated-socket invalid cleanup preserves target/control and valid cleanup removes only the exact target
 ```
+
+The 2026-08-05 legacy-record repair pass added the endpoint-authority half of the same boundary:
+
+```text
+ok - fm-teardown: an unproven Herdr endpoint still refuses under --force and names the sanctioned repair
+ok - fm-teardown: an empty, duplicated, foreign, contradictory, or inconsistent release marker refuses
+ok - fm-teardown: an endpoint release marker on a non-Herdr record refuses before any mutation or runtime call
+ok - fm-teardown: a released Herdr record is retired and its recorded endpoint is never commanded
+ok - fm-teardown: a released Herdr record's presentation journal is removed without any herdr command
+ok - fm-endpoint-rebind: a record with no trailing newline is repaired into a well-formed record
+ok - released Herdr endpoint with unpushed work is refused (landed-work safety unchanged)
+ok - released Herdr endpoint with a dirty worktree is refused (dirty check unchanged)
+ok - released Herdr endpoint with landed work is retired without any herdr command
+ok - fm-endpoint-rebind: no flag, argument, or environment variable can force an unproven repair
+```
+
+Both guards were mutation-checked rather than assumed: weakening the identity proof to drop its label and pane-count requirement, dropping the release check that a task-labeled tab must not survive, removing the endpoint-authority guard at the cleanup kill site, and skipping the landed-work checks for a released record each produced a failing assertion in the suites above.
 
 The dedicated tmux cell removed ambient tmux variables, required a socket-bound wrapper, kept one target and one independent control window, and proved the wrapper was not called for invalid metadata or a direct empty target.
 Valid cleanup removed only the exact task-bound target and left the control window live.
@@ -454,6 +472,35 @@ FM_AFK_PI_HERDR_E2E=1 HERDR_LAB_HELPER=bin/fm-herdr-lab.sh \
 
 Observed guarantees: pending composer input refused injection and raised one alert; idle Pi accepted one marked escalation; the return gate refused ordinary work while a live blocker remained; resolving the blocker allowed the return flow.
 The dedicated Herdr daemon workspace topology is covered by `tests/fm-afk-launch.test.sh` and preserves the captain tab's pane count.
+
+### Legacy endpoint repair evidence
+
+`bin/fm-endpoint-rebind.sh` depends on four response shapes, probed read-only against a live Herdr 0.7.5 default session on 2026-08-05.
+Identifiers below are neutral stand-ins for the real ids used at probe time.
+
+```sh
+herdr pane get <absent-pane> --session default          # exit 1
+herdr tab list --workspace <absent-workspace> --session default   # exit 1
+herdr pane get <live-pane> --session default            # exit 0
+herdr tab list --workspace <live-workspace> --session default     # exit 0
+herdr pane get <any-pane> --session <no-such-session>   # exit 1
+```
+
+Observed current shapes:
+
+```text
+{"error":{"code":"pane_not_found","message":"pane wA:pB not found"},"id":"cli:pane:get"}
+{"error":{"code":"workspace_not_found","message":"workspace wZ not found"},"id":"cli:tab:list"}
+{"result":{"pane":{"pane_id":"wA:pC","tab_id":"wA:tC","workspace_id":"wA","agent_status":"idle", ...}}}
+{"result":{"tabs":[{"tab_id":"wA:tC","label":"fm-<task-id>","pane_count":1,"workspace_id":"wA", ...}]}}
+Error: Os { code: 2, kind: NotFound, message: "No such file or directory" }
+```
+
+Four facts the repair relies on, all confirmed by the above: an error body is written to STDERR with exit 1 while a success body goes to stdout with exit 0; `pane_not_found` and `workspace_not_found` are positive server answers, so a stopped or missing session produces a non-JSON failure instead and can never be mistaken for absence; `tab list` reports the live `label` and `pane_count` this repair matches against `fm-<task-id>`; and a task tab created by `bin/fm-spawn.sh` still carries exactly that label.
+The Restart row in the CLI matrix above is what makes the release outcome safe across a server restart: because workspace, tab, pane, and labels persist, a restored task tab still answers the label check and refuses release rather than abandoning a pane that came back.
+
+Known limitation, by design: if a task's recorded workspace is gone while its pane was somehow re-created elsewhere, release retires firstmate's record and leaves that pane for manual cleanup.
+Releasing never closes a pane, so a stray husk is the deliberate cost of never closing an unproven one.
 
 ## Zellij
 

@@ -360,14 +360,8 @@ fm_backend_target_of_meta() {  # <meta-file>
   [ -n "$window" ] && printf '%s' "$window"
 }
 
-# fm_backend_validate_task_endpoint: validate a task cleanup record entirely
-# from its durable metadata before any runtime command or cleanup mutation.
-# The validation binds the exact task id, selected backend, target, project,
-# and worktree. New non-tmux records carry endpoint_task_id because their
-# opaque runtime ids do not encode the task label. Legacy tmux records remain
-# valid only when their window name itself is exactly fm-<task-id>.
-# On success, sets FM_BACKEND_VALIDATED_BACKEND and
-# FM_BACKEND_VALIDATED_TARGET. On failure, prints one refusal and returns 1.
+# The exactly-one-occurrence reader every identity field below goes through: an
+# absent, empty, or duplicated key returns 1 rather than a value to act on.
 fm_backend_meta_exact_value() {  # <meta-file> <key>
   local meta=$1 key=$2 count value
   count=$(grep -c "^$key=" "$meta" 2>/dev/null || true)
@@ -383,11 +377,63 @@ fm_backend_endpoint_atom_valid() {  # <value>
   esac
 }
 
+# fm_backend_herdr_endpoint_fields_consistent: the one structural check a Herdr
+# cleanup record must pass, shared by fm_backend_validate_task_endpoint and
+# bin/fm-endpoint-rebind.sh so the repair can never bless a record teardown
+# would still reject. Returns 1 silently; each caller owns its own refusal.
+fm_backend_herdr_endpoint_fields_consistent() {  # <window> <session> <workspace> <tab> <pane>
+  local window=$1 session=$2 workspace=$3 tab=$4 pane=$5
+  [ -n "$session" ] && [ -n "$workspace" ] && [ -n "$tab" ] && [ -n "$pane" ] || return 1
+  [ "$window" = "$session:$pane" ] || return 1
+  fm_backend_endpoint_atom_valid "$session" || return 1
+  fm_backend_endpoint_atom_valid "$workspace" || return 1
+  fm_backend_endpoint_atom_valid "${tab//:/_}" || return 1
+  fm_backend_endpoint_atom_valid "${pane//:/_}" || return 1
+  return 0
+}
+
+# fm_backend_meta_endpoint_action_forbidden: 0 when <meta-file> carries ANY
+# endpoint_released= line, so no runtime endpoint command may be issued for that
+# task. Deliberately a presence test rather than a value test: an unreadable,
+# duplicated, or mismatched marker must still forbid endpoint action here.
+# fm_backend_validate_task_endpoint - which every cleanup entry point runs
+# first - is the one owner of the marker's scope: it refuses such a record
+# outright, and it is also where the marker's Herdr-only restriction lives, so
+# a marker on any other backend never reaches a caller of this predicate.
+fm_backend_meta_endpoint_action_forbidden() {  # <meta-file>
+  local meta=$1
+  [ -f "$meta" ] || return 1
+  grep -q '^endpoint_released=' "$meta" 2>/dev/null
+}
+
+# fm_backend_validate_task_endpoint: validate a task cleanup record entirely
+# from its durable metadata before any runtime command or cleanup mutation.
+# The validation binds the exact task id, selected backend, target, project,
+# and worktree. New non-tmux records carry endpoint_task_id because their
+# opaque runtime ids do not encode the task label. Legacy tmux records remain
+# valid only when their window name itself is exactly fm-<task-id>.
+#
+# A legacy opaque record that predates endpoint_task_id may instead carry the
+# endpoint_released= marker bin/fm-endpoint-rebind.sh writes once the live
+# runtime has answered that the task has no endpoint at its recorded address.
+# That marker authorizes the non-endpoint half of cleanup ONLY: it satisfies the
+# exact-task-binding requirement while forbidding every endpoint command, so no
+# pane is ever acted on without proven identity. It is not a force flag and
+# cannot be hand-written into effect - fm-endpoint-rebind.sh writes it only from
+# live evidence, and a marker that is empty, duplicated, names another task, or
+# sits alongside a real binding refuses here.
+# On success, sets FM_BACKEND_VALIDATED_BACKEND, FM_BACKEND_VALIDATED_TARGET,
+# and FM_BACKEND_VALIDATED_ENDPOINT_ACTION (allowed or forbidden).
+# On failure, prints one refusal and returns 1.
 fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
   local meta=$1 id=$2 backend_count backend window worktree project binding_count binding
+  local released_count released
   local session pane recorded_session workspace tab terminal worktree_id surface
   FM_BACKEND_VALIDATED_BACKEND=
   FM_BACKEND_VALIDATED_TARGET=
+  # Fail safe: an early refusal below leaves endpoint action forbidden, never allowed.
+  # shellcheck disable=SC2034 # Output global is consumed by sourcing callers.
+  FM_BACKEND_VALIDATED_ENDPOINT_ACTION=forbidden
   [ -f "$meta" ] && [ ! -L "$meta" ] || {
     echo "REFUSED: task $id has no regular endpoint metadata at $meta; preserving task state." >&2
     return 1
@@ -440,6 +486,36 @@ fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
     echo "REFUSED: endpoint metadata belongs to task $binding, not $id; preserving task state." >&2
     return 1
   fi
+  released_count=$(grep -c '^endpoint_released=' "$meta" 2>/dev/null || true)
+  case "$released_count" in
+    0) released= ;;
+    1)
+      released=$(fm_backend_meta_exact_value "$meta" endpoint_released) || {
+        echo "REFUSED: task $id has an empty endpoint release marker; preserving task state." >&2
+        return 1
+      }
+      ;;
+    *)
+      echo "REFUSED: task $id has an ambiguous endpoint release marker; preserving task state." >&2
+      return 1
+      ;;
+  esac
+  if [ -n "$released" ] && [ "$released" != "$id" ]; then
+    echo "REFUSED: endpoint release marker belongs to task $released, not $id; preserving task state." >&2
+    return 1
+  fi
+  if [ -n "$released" ] && [ -n "$binding" ]; then
+    echo "REFUSED: task $id records both an endpoint binding and a release marker; preserving task state." >&2
+    return 1
+  fi
+  # The marker is only ever written from Herdr's empirically verified live
+  # identity surface, so on any other backend it can only be hand-written.
+  # Refusing is the fail-closed answer: silently ignoring it would let a record
+  # be retired while its live endpoint kept running untracked.
+  if [ "$released_count" -ne 0 ] && [ "$backend" != herdr ]; then
+    echo "REFUSED: task $id records an endpoint release marker on backend $backend, which has no verified release path; preserving task state." >&2
+    return 1
+  fi
 
   case "$backend" in
     tmux)
@@ -452,20 +528,17 @@ fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
       fi
       ;;
     herdr)
-      [ "$binding" = "$id" ] || {
+      [ "$binding" = "$id" ] || [ "$released" = "$id" ] || {
         echo "REFUSED: legacy Herdr endpoint metadata for task $id lacks an exact task binding; preserving task state." >&2
+        echo "Establish one from live runtime evidence with 'bin/fm-endpoint-rebind.sh $id'; there is no forcing path." >&2
         return 1
       }
       recorded_session=$(fm_backend_meta_exact_value "$meta" herdr_session) || recorded_session=
       workspace=$(fm_backend_meta_exact_value "$meta" herdr_workspace_id) || workspace=
       tab=$(fm_backend_meta_exact_value "$meta" herdr_tab_id) || tab=
       pane=$(fm_backend_meta_exact_value "$meta" herdr_pane_id) || pane=
-      if [ -z "$recorded_session" ] || [ -z "$workspace" ] || [ -z "$tab" ] || [ -z "$pane" ] \
-        || [ "$window" != "$recorded_session:$pane" ] \
-        || ! fm_backend_endpoint_atom_valid "$recorded_session" \
-        || ! fm_backend_endpoint_atom_valid "$workspace" \
-        || ! fm_backend_endpoint_atom_valid "${tab//:/_}" \
-        || ! fm_backend_endpoint_atom_valid "${pane//:/_}"; then
+      if ! fm_backend_herdr_endpoint_fields_consistent \
+        "$window" "$recorded_session" "$workspace" "$tab" "$pane"; then
         echo "REFUSED: Herdr endpoint metadata for task $id is malformed or inconsistent; preserving task state." >&2
         return 1
       fi
@@ -528,6 +601,10 @@ fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
   FM_BACKEND_VALIDATED_BACKEND=$backend
   # shellcheck disable=SC2034 # Output globals are consumed by sourcing callers.
   FM_BACKEND_VALIDATED_TARGET=$window
+  if [ -z "$released" ]; then
+    # shellcheck disable=SC2034 # Output global is consumed by sourcing callers.
+    FM_BACKEND_VALIDATED_ENDPOINT_ACTION=allowed
+  fi
   return 0
 }
 
