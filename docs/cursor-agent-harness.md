@@ -34,6 +34,9 @@ The Cursor Grok 4.6 catalog has no `max` entry, so `max` caps at that family's h
 The mapping uses only non-fast ids: every 4.6 rung also has a `-fast` sibling, but a `-fast` variant is a separate latency and cost tradeoff and is only ever selected by asking for it explicitly.
 Any concrete requested model - inside or outside the Cursor Grok 4.6 family, including a `cursor-grok-4.5-*` id - always wins unchanged; effort never remaps it.
 
+Whichever way the model id was chosen - an explicit `--model`, the `config/secondmate-harness` token, or the effort mapping above - `bin/fm-spawn.sh` checks it against the live `cursor-agent --list-models` catalog before launching and refuses the spawn if the catalog does not list it, naming which of those three origins produced the id so the fix is unambiguous.
+A drifted catalog therefore surfaces as a loud pre-launch refusal rather than a pane that dies on an unusable model.
+
 ## Supervision signals
 
 The busy-only ASCII hint is `ctrl+c to stop`.
