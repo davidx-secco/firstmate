@@ -20,18 +20,19 @@ The adapter never edits `~/.cursor/cli-config.json` or any other global Cursor s
 A positional prompt starts the first turn and the TUI stays open for follow-ups.
 
 Cursor has no standalone effort flag.
-When no concrete model is selected - no model at all, or the `default` sentinel, which emits no `--model` flag for any harness - Firstmate maps its effort axis to the empirically listed Cursor Grok 4.5 models:
+When no concrete model is selected - no model at all, or the `default` sentinel, which emits no `--model` flag for any harness - Firstmate maps its effort axis to the empirically listed Cursor Grok 4.6 models:
 
 | Firstmate effort | Cursor model id |
 |---|---|
-| `low` | `cursor-grok-4.5-low` |
-| `medium` | `cursor-grok-4.5-medium` |
-| `high` | `cursor-grok-4.5-high` |
-| `xhigh` | `cursor-grok-4.5-high` |
-| `max` | `cursor-grok-4.5-high` |
+| `low` | `cursor-grok-4.6-low` |
+| `medium` | `cursor-grok-4.6-medium` |
+| `high` | `cursor-grok-4.6-high` |
+| `xhigh` | `cursor-grok-4.6-xhigh` |
+| `max` | `cursor-grok-4.6-xhigh` |
 
-The Cursor Grok 4.5 catalog has no `xhigh` or `max` entry, so those values cap at its highest listed model instead of becoming an invented flag or model id.
-Any concrete requested model — inside or outside the Cursor Grok 4.5 family — always wins unchanged; effort never remaps it.
+The Cursor Grok 4.6 catalog has no `max` entry, so `max` caps at that family's highest listed model instead of becoming an invented flag or model id.
+The mapping uses only non-fast ids: every 4.6 rung also has a `-fast` sibling, but a `-fast` variant is a separate latency and cost tradeoff and is only ever selected by asking for it explicitly.
+Any concrete requested model - inside or outside the Cursor Grok 4.6 family, including a `cursor-grok-4.5-*` id - always wins unchanged; effort never remaps it.
 
 ## Supervision signals
 
@@ -142,16 +143,29 @@ agent models
 ```
 
 `agent --help` advertised `--model <model>` and no separate `--effort` option.
-The 2026-07-23 catalog output included these exact entries:
+Re-verified on 2026-08-18 with `cursor-agent --list-models` under CLI version `2026.08.04-aaa8809`, which listed these exact Cursor Grok entries:
 
 ```text
-cursor-grok-4.5-low - Cursor Grok 4.5 Low
-cursor-grok-4.5-medium - Cursor Grok 4.5 Medium
+cursor-grok-4.6-high-fast - Cursor Grok 4.6 Fast
+cursor-grok-4.6-low - Cursor Grok 4.6 Low
+cursor-grok-4.6-low-fast - Cursor Grok 4.6 Low Fast
+cursor-grok-4.6-medium - Cursor Grok 4.6 Medium
+cursor-grok-4.6-medium-fast - Cursor Grok 4.6 Medium Fast
+cursor-grok-4.6-high - Cursor Grok 4.6
+cursor-grok-4.6-xhigh - Cursor Grok 4.6 Extra High
+cursor-grok-4.6-xhigh-fast - Cursor Grok 4.6 Extra High Fast
 cursor-grok-4.5-high - Cursor Grok 4.5
+cursor-grok-4.5-high-fast - Cursor Grok 4.5 Fast
+cursor-grok-4.5-low - Cursor Grok 4.5 Low
+cursor-grok-4.5-low-fast - Cursor Grok 4.5 Low Fast
+cursor-grok-4.5-medium - Cursor Grok 4.5 Medium
+cursor-grok-4.5-medium-fast - Cursor Grok 4.5 Medium Fast
 ```
 
+The 4.5 family remains listed and stays selectable as an explicit concrete model; 4.6 is what the effort axis maps onto, because it is the family that lists a distinct id per rung.
 The catalog also included model families whose effort is encoded in ids such as `-xhigh` and `-max`, plus parameterized model bracket overrides.
-Firstmate uses only the concrete Cursor Grok entries above for its default mapping.
+Firstmate uses only the concrete non-fast Cursor Grok 4.6 entries above for its default mapping.
+Ids drift: re-run `cursor-agent --list-models` and refresh this section rather than trusting the sample above.
 
 ### Interactive tmux supervision
 

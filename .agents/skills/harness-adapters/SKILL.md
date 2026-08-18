@@ -134,7 +134,7 @@ The supported launch-profile flags below are verified locally; each row records 
 | pi / pi-signed | `--model <model>` | `--thinking <low\|medium\|high\|xhigh\|max>` | Verified 2026-07-27 on Pi and pi-signed 0.82.0. Both expose the same accepted thinking levels and completed the same model-qualified max-thinking smoke. |
 | opencode | `--model <provider/model>` | none for firstmate's interactive launch | Verified on opencode 1.17.6. `opencode run` has `--variant`, but firstmate launches the interactive `opencode --prompt` path, which has no verified effort flag. |
 | kimi | `--model <model>` | none | Verified 2026-07-25 on Kimi Code CLI 0.29.1. |
-| cursor | `--model <model>` | none | Verified 2026-08-11 on Cursor Agent CLI 2026.08.11-e8db854. No effort flag exists, so firstmate records the requested effort in task metadata and omits it from the launch. Validate ids against `cursor-agent --list-models` rather than assuming a low/medium/high family: the live catalog carries only `-high` Grok ids. |
+| cursor | `--model <model>` | none | Verified 2026-08-11 on Cursor Agent CLI 2026.08.11-e8db854. No effort flag exists, so firstmate records the requested effort in task metadata and omits it from the launch. Validate ids against `cursor-agent --list-models` rather than assuming which rungs exist; the Cursor row below owns the current catalog facts. |
 | muse | `--model <model>` | `--reasoning-effort <low\|medium\|high\|xhigh>`, and `ultra` only for an explicit `max` | Verified 2026-08-05 on Muse Code 0.1.0-R708.1. The flag accepts `none\|minimal\|low\|medium\|high\|xhigh\|ultra` and defaults to `high`. `ultra` is muse's max-class level, so it is reachable only through an explicit captain `max`, never from the generic fallback; `none` and `minimal` sit below the shared vocabulary and stay unreachable. |
 
 The concrete `harness` field owns adapter identity independently of the model provider: `harness=pi` with `model=xai/grok-*` is Pi using xAI, not `harness=grok`, and does not require Grok CLI login; `harness=grok` remains the standalone Grok Build CLI adapter.
@@ -404,7 +404,7 @@ Do not confuse `harness=cursor` using a `cursor-grok-4.5-*` model with `harness=
 |---|---|
 | Binary | Resolved through `fm_cursor_resolve_binary` (bin/fm-cursor-lib.sh). `cursor` is NOT the CLI: the installed names are `cursor-agent` and the legacy alias `agent`, both symlinked into `~/.local/share/cursor-agent/versions/<version>/cursor-agent`. The STABLE launcher is used, never the versioned target, which the CLI replaces on its own auto-update. |
 | Launch | A positional prompt with `--trust`, `--yolo`, `--model <model>` when selected, and `--workspace <absolute-task-worktree>`, behind `env -u` of the foreign primary markers. |
-| Models | Validate against `cursor-agent --list-models` for the current account rather than a fixed list; that list has already drifted once. The live catalog contains only `-high` Grok ids (`cursor-grok-4.5-high`, `cursor-grok-4.5-high-fast`) and several `xhigh` ids, so an assumed low/medium Grok id is invalid. |
+| Models | Validate against `cursor-agent --list-models` for the current account rather than a fixed list; that list has drifted more than once, in both directions. Never assume an id is absent either: as of 2026-08-18 the catalog carries a full `low`/`medium`/`high`/`xhigh` Cursor Grok 4.6 ladder plus `low`/`medium`/`high` Grok 4.5 ids, each with a `-fast` sibling. `bin/fm-spawn.sh` rejects any `--model` the live catalog does not list, and owns the effort-to-model default ([`docs/cursor-agent-harness.md`](../../../docs/cursor-agent-harness.md)). |
 | Busy state | Its own per-conversation transcript, folded on demand by `bin/fm-busy-lib.sh` (source `cursor-transcript`). Each turn is bracketed by a `role:user` open and a typed `turn_ended` close covering `success` and `aborted`, so unlike Claude's `Stop` hook this source covers manual interruption. Nothing is armed and no record is ever seeded. Backend-agnostic, and confirmed identical on tmux and Herdr. |
 | Exit command | `/exit` |
 | Interrupt | Single Escape. The composer returns to its placeholder rather than the cancelled prompt, so NO clear key is needed (unlike muse). `bin/fm-control-lib.sh` claims no cancellation acknowledgement: the aborted transcript close appeared within seconds in some runs and not within twenty in others. |
@@ -459,7 +459,7 @@ The raw CLI accepts repeatable `--add-dir <path>` for deliberate multi-root work
 Spawn a Cursor scout with an explicit model:
 
 ```bash
-bin/fm-spawn.sh <task-id> <project> --scout --harness cursor --model cursor-grok-4.5-high
+bin/fm-spawn.sh <task-id> <project> --scout --harness cursor --model cursor-grok-4.6-high
 ```
 
 ## kimi (VERIFIED 2026-07-25, kimi 0.29.1)

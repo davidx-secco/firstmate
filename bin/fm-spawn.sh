@@ -1282,8 +1282,11 @@ fi
 
 # Cursor exposes no standalone effort flag. Its catalog encodes effort in model
 # ids, so when no CONCRETE model was requested, map Firstmate's effort axis onto
-# the empirically listed Cursor Grok 4.5 models. xhigh/max cap at that family's
-# highest listed model. An explicitly selected model always wins unchanged
+# the empirically listed Cursor Grok 4.6 models, which carry a real
+# low/medium/high/xhigh ladder. That family lists no -max entry, so max caps at
+# its highest listed id. Only non-fast ids are used as defaults; a -fast variant
+# is a deliberate explicit choice, never an effort-derived default. An
+# explicitly selected model always wins unchanged
 # rather than being remapped or receiving an invented suffix or bracket
 # override. The gate is "no concrete model", not MODEL_SET: model_flag_for_harness
 # treats the sentinel "default" as no model and emits no flag, so `--model default`
@@ -1292,9 +1295,10 @@ fi
 if [ "$HARNESS" = cursor ] && [ -n "$EFFORT" ] \
    && { [ -z "$MODEL" ] || [ "$MODEL" = default ]; }; then
   case "$EFFORT" in
-    low) MODEL=cursor-grok-4.5-low ;;
-    medium) MODEL=cursor-grok-4.5-medium ;;
-    high|xhigh|max) MODEL=cursor-grok-4.5-high ;;
+    low) MODEL=cursor-grok-4.6-low ;;
+    medium) MODEL=cursor-grok-4.6-medium ;;
+    high) MODEL=cursor-grok-4.6-high ;;
+    xhigh|max) MODEL=cursor-grok-4.6-xhigh ;;
   esac
 fi
 
@@ -1437,7 +1441,7 @@ effort_flag_for_harness() {
     # to a different, non-interactive launch mode, so fm-spawn does not pass it.
     # kimi likewise has no reasoning-effort flag; the requested axis stays in
     # task metadata but never reaches the launch command. Cursor encodes effort
-    # in model ids such as cursor-grok-4.5-high, so it also receives no separate
+    # in model ids such as cursor-grok-4.6-high, so it also receives no separate
     # effort flag.
   esac
 }
