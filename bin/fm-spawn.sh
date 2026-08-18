@@ -270,6 +270,7 @@ KIND=ship
 KIND_SET=0
 HARNESS_ARG=
 MODEL=
+MODEL_ORIGIN=flag
 EFFORT=
 BACKEND_ARG=
 MODE=
@@ -1247,14 +1248,6 @@ case "$HARNESS" in
     # missing install a loud spawn refusal instead of a pane that dies with a
     # command-not-found the supervisor would read as a wedged worker.
     CURSOR_BIN=$(fm_cursor_resolve_binary) || exit 1
-    if [ -n "$MODEL" ] && [ "$MODEL" != default ]; then
-      if CURSOR_MODELS=$(fm_cursor_list_models "$CURSOR_BIN"); then
-        if ! printf '%s\n' "$CURSOR_MODELS" | fm_cursor_catalog_has_model "$MODEL"; then
-          echo "error: Cursor model '$MODEL' is not available from '$CURSOR_BIN --list-models'; choose an id listed by that command or omit --model" >&2
-          exit 1
-        fi
-      fi
-    fi
     ;;
 esac
 
@@ -1267,7 +1260,10 @@ esac
 if [ "$KIND" = secondmate ] && [ -z "$ARG3" ]; then
   if [ "$MODEL_SET" -eq 0 ]; then
     SM_MODEL=$("$SCRIPT_DIR/fm-harness.sh" secondmate-model)
-    [ -z "$SM_MODEL" ] || MODEL=$SM_MODEL
+    if [ -n "$SM_MODEL" ]; then
+      MODEL=$SM_MODEL
+      MODEL_ORIGIN=secondmate-config
+    fi
   fi
   if [ "$EFFORT_SET" -eq 0 ]; then
     SM_EFFORT=$("$SCRIPT_DIR/fm-harness.sh" secondmate-effort)
@@ -1282,8 +1278,11 @@ fi
 
 # Cursor exposes no standalone effort flag. Its catalog encodes effort in model
 # ids, so when no CONCRETE model was requested, map Firstmate's effort axis onto
-# the empirically listed Cursor Grok 4.5 models. xhigh/max cap at that family's
-# highest listed model. An explicitly selected model always wins unchanged
+# the empirically listed Cursor Grok 4.6 models, which carry a real
+# low/medium/high/xhigh ladder. That family lists no -max entry, so max caps at
+# its highest listed id. Only non-fast ids are used as defaults; a -fast variant
+# is a deliberate explicit choice, never an effort-derived default. An
+# explicitly selected model always wins unchanged
 # rather than being remapped or receiving an invented suffix or bracket
 # override. The gate is "no concrete model", not MODEL_SET: model_flag_for_harness
 # treats the sentinel "default" as no model and emits no flag, so `--model default`
@@ -1292,10 +1291,34 @@ fi
 if [ "$HARNESS" = cursor ] && [ -n "$EFFORT" ] \
    && { [ -z "$MODEL" ] || [ "$MODEL" = default ]; }; then
   case "$EFFORT" in
-    low) MODEL=cursor-grok-4.5-low ;;
-    medium) MODEL=cursor-grok-4.5-medium ;;
-    high|xhigh|max) MODEL=cursor-grok-4.5-high ;;
+    low) MODEL=cursor-grok-4.6-low; MODEL_ORIGIN=effort ;;
+    medium) MODEL=cursor-grok-4.6-medium; MODEL_ORIGIN=effort ;;
+    high) MODEL=cursor-grok-4.6-high; MODEL_ORIGIN=effort ;;
+    xhigh|max) MODEL=cursor-grok-4.6-xhigh; MODEL_ORIGIN=effort ;;
   esac
+fi
+
+# Catalog validation runs here, after every writer of MODEL - the --model flag,
+# the secondmate-harness token fallback, and the effort mapping above - so a
+# derived or config-pinned id gets the same loud pre-launch refusal an explicit
+# --model gets instead of dying as an unusable model inside the pane.
+if [ "$HARNESS" = cursor ] && [ -n "$MODEL" ] && [ "$MODEL" != default ]; then
+  if CURSOR_MODELS=$(fm_cursor_list_models "$CURSOR_BIN"); then
+    if ! printf '%s\n' "$CURSOR_MODELS" | fm_cursor_catalog_has_model "$MODEL"; then
+      case "$MODEL_ORIGIN" in
+        effort)
+          echo "error: Cursor model '$MODEL', derived from the requested effort '$EFFORT' because harness cursor has no effort flag, is not available from '$CURSOR_BIN --list-models'; pass an explicit --model listed by that command, since omitting --model is what selected this id" >&2
+          ;;
+        secondmate-config)
+          echo "error: Cursor model '$MODEL', pinned by config/secondmate-harness, is not available from '$CURSOR_BIN --list-models'; correct that file's model token to an id listed by that command, or pass an explicit --model" >&2
+          ;;
+        *)
+          echo "error: Cursor model '$MODEL' is not available from '$CURSOR_BIN --list-models'; choose an id listed by that command or omit --model" >&2
+          ;;
+      esac
+      exit 1
+    fi
+  fi
 fi
 
 secondmate_registry_value() {
@@ -1437,7 +1460,7 @@ effort_flag_for_harness() {
     # to a different, non-interactive launch mode, so fm-spawn does not pass it.
     # kimi likewise has no reasoning-effort flag; the requested axis stays in
     # task metadata but never reaches the launch command. Cursor encodes effort
-    # in model ids such as cursor-grok-4.5-high, so it also receives no separate
+    # in model ids such as cursor-grok-4.6-high, so it also receives no separate
     # effort flag.
   esac
 }

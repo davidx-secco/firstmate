@@ -468,7 +468,7 @@ test_env_snippet_fails_closed_in_the_shell() {
 # worker's own shell receives and what the durable record keeps.
 
 make_spawn_case() {  # <name> <id> <origin>
-  local name=$1 id=$2 origin=$3 dir home proj wt fakebin log
+  local name=$1 id=$2 origin=$3 dir home proj wt fakebin log bare
   dir="$TMP_ROOT/$name"
   home="$dir/home"
   proj="$dir/project"
@@ -493,7 +493,29 @@ SH
   fm_git_worktree "$proj" "$wt" "wt-$name"
   # fm_git_worktree seeds its own local bare origin, so point that existing
   # remote at the forge URL under test rather than adding a second one.
+  bare=$(cd "$proj.origin.git" && pwd)
   git -C "$proj" remote set-url origin "$origin"
+  # Selection reads that forge URL, but the spawn also refreshes the task
+  # worktree's base from the same remote, so the fetch has to resolve somewhere.
+  # This ssh stand-in serves it from the local bare clone the fixture already
+  # has (run_spawn hands it to git as GIT_SSH_COMMAND): without one the fetch
+  # leaves the machine, so the case passes only where the real forge happens to
+  # be reachable and credentialed, and elsewhere the spawn fails for a reason
+  # that has nothing to do with account selection. Only the transport stands in
+  # - the origin URL git and this repo read stays the forge URL under test.
+  # shellcheck disable=SC2016  # deliberate: the generated stub expands these, not the test shell
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'set -u\n'
+    printf '# git passes the remote command as its last argument.\n'
+    printf 'case "${!#}" in\n'
+    printf '  git-upload-pack*) exec git upload-pack %s ;;\n' "$(printf %q "$bare")"
+    printf '  git-receive-pack*) exec git receive-pack %s ;;\n' "$(printf %q "$bare")"
+    printf 'esac\n'
+    printf 'printf "fake ssh: unexpected remote command: %%s\\n" "${!#}" >&2\n'
+    printf 'exit 1\n'
+  } > "$dir/fake-ssh"
+  chmod +x "$dir/fake-ssh"
   printf 'brief for %s\n' "$id" > "$home/data/$id/brief.md"
   touch "$home/state/.last-watcher-beat"
   : > "$log"
@@ -551,6 +573,7 @@ run_spawn() {  # <id> <accounts> <access>
     FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux TMUX="fake,1,0" \
     FM_FAKE_PANE_PATH="$WT_DIR" FM_FAKE_TMUX_LOG="$SENT_LOG" \
     FM_FAKE_GH_ACCOUNTS="$accounts" FM_FAKE_GH_ACCESS="$access" FM_FAKE_GH_LOG="$LOG" \
+    GIT_SSH_COMMAND="$CASE_DIR/fake-ssh" \
     PATH="${SPAWN_PATH_PREFIX:+$SPAWN_PATH_PREFIX:}$FAKEBIN:$PATH" \
     "$SPAWN" "$id" "$PROJ_DIR" --harness claude --mode no-mistakes --yolo off 2>&1
 }

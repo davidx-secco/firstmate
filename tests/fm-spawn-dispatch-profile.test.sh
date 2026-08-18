@@ -69,7 +69,7 @@ SH
 #!/usr/bin/env bash
 if [ "${1:-}" = --list-models ]; then
   [ "${FM_FAKE_CURSOR_LIST_STATUS:-0}" -eq 0 ] || exit "${FM_FAKE_CURSOR_LIST_STATUS}"
-  printf '%b\n' "${FM_FAKE_CURSOR_MODELS:-Available models\ncursor-grok-4.5-high - Grok 4.5 High}"
+  printf '%b\n' "${FM_FAKE_CURSOR_MODELS:-Available models\ncursor-grok-4.6-low - Cursor Grok 4.6 Low\ncursor-grok-4.6-medium - Cursor Grok 4.6 Medium\ncursor-grok-4.6-high - Cursor Grok 4.6\ncursor-grok-4.6-xhigh - Cursor Grok 4.6 Extra High\ncursor-grok-4.5-low - Cursor Grok 4.5 Low\ncursor-grok-4.5-high - Cursor Grok 4.5\nclaude-opus-4-8-thinking-high - Claude Opus 4.8 Thinking}"
 fi
 exit 0
 SH
@@ -575,7 +575,10 @@ test_cursor_refuses_model_absent_from_live_catalog() {
 }
 
 test_cursor_failed_catalog_probe_does_not_block_spawn() {
-  local rec id out status launch
+  # FM_TEST_CURSOR_LIST_STATUS is declared local here so the forced probe
+  # failure cannot leak into later cases and silently disable their catalog
+  # validation.
+  local rec id out status launch FM_TEST_CURSOR_LIST_STATUS
   id=profile-cursor-catalog-unreachable-z6e
   rec=$(make_spawn_case profile-cursor-catalog-unreachable cursor "$id")
   read_case_record "$rec"
@@ -625,9 +628,9 @@ test_cursor_maps_effort_when_model_is_the_default_sentinel() {
     --model default --effort xhigh)
   status=$?
   expect_code 0 "$status" "cursor spawn with --model default and xhigh effort should succeed"
-  assert_meta_profile "$HOME_DIR/state/$id.meta" cursor cursor-grok-4.5-high xhigh
+  assert_meta_profile "$HOME_DIR/state/$id.meta" cursor cursor-grok-4.6-xhigh xhigh
   launch=$(cat "$LAUNCH_LOG")
-  assert_contains "$launch" "--model 'cursor-grok-4.5-high'" \
+  assert_contains "$launch" "--model 'cursor-grok-4.6-xhigh'" \
     "cursor dropped the effort axis when the model was the 'default' sentinel"
   assert_not_contains "$launch" "--model 'default'" "cursor must not pass the 'default' sentinel as a model id"
   assert_not_contains "$launch" "--effort" "cursor launch must not invent an effort flag"
@@ -648,7 +651,7 @@ test_cursor_preserves_unrelated_explicit_model() {
   launch=$(cat "$LAUNCH_LOG")
   assert_contains "$launch" "--model 'claude-opus-4-8-thinking-high'" \
     "cursor launch changed an explicit model outside the verified mapping family"
-  assert_not_contains "$launch" "cursor-grok-4.5-low" "cursor effort mapping must not overwrite an unrelated explicit model"
+  assert_not_contains "$launch" "cursor-grok-4.6-low" "cursor effort mapping must not overwrite an unrelated explicit model"
   pass "cursor preserves an explicit model outside its default mapping family"
 }
 
@@ -659,16 +662,95 @@ test_cursor_preserves_explicit_in_family_model() {
   read_case_record "$rec"
 
   out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    --model cursor-grok-4.5-low --effort high)
+    --model cursor-grok-4.6-low --effort high)
   status=$?
   expect_code 0 "$status" "cursor spawn with an explicit in-family model and conflicting effort should succeed"
-  assert_meta_profile "$HOME_DIR/state/$id.meta" cursor cursor-grok-4.5-low high
+  assert_meta_profile "$HOME_DIR/state/$id.meta" cursor cursor-grok-4.6-low high
   launch=$(cat "$LAUNCH_LOG")
-  assert_contains "$launch" "--model 'cursor-grok-4.5-low'" \
+  assert_contains "$launch" "--model 'cursor-grok-4.6-low'" \
     "cursor launch remapped an explicit in-family model based on effort"
-  assert_not_contains "$launch" "cursor-grok-4.5-high" \
+  assert_not_contains "$launch" "cursor-grok-4.6-high" \
     "cursor effort mapping must not override an explicitly selected in-family model"
   pass "cursor keeps an explicit in-family model despite a conflicting effort"
+}
+
+# Moving the effort default from Grok 4.5 to 4.6 must not retire the 4.5 ids:
+# they are still listed by the live catalog and stay selectable by name.
+test_cursor_preserves_explicit_legacy_family_model() {
+  local rec id out status launch
+  id=profile-cursor-legacy-z23
+  rec=$(make_spawn_case profile-cursor-legacy cursor "$id")
+  read_case_record "$rec"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --model cursor-grok-4.5-low --effort xhigh)
+  status=$?
+  expect_code 0 "$status" "cursor spawn with an explicit legacy Grok 4.5 model should succeed"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" cursor cursor-grok-4.5-low xhigh
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "--model 'cursor-grok-4.5-low'" \
+    "cursor launch did not preserve an explicitly requested legacy Grok 4.5 model"
+  assert_not_contains "$launch" "cursor-grok-4.6" \
+    "cursor effort mapping must not upgrade an explicitly requested legacy model"
+  pass "cursor keeps an explicitly requested legacy Grok 4.5 model"
+}
+
+# Acceptance: every effort rung must resolve to an id the live catalog lists,
+# so no effort level can fail the spawn's own catalog validation.
+test_cursor_effort_ladder_resolves_listed_models_at_every_level() {
+  local rec id out status launch level expected n=0
+  while read -r level expected; do
+    n=$((n + 1))
+    id="profile-cursor-ladder-z24-$n"
+    rec=$(make_spawn_case "profile-cursor-ladder-$level" cursor "$id")
+    read_case_record "$rec"
+
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+      --effort "$level")
+    status=$?
+    expect_code 0 "$status" "cursor spawn at $level effort should succeed"
+    assert_meta_profile "$HOME_DIR/state/$id.meta" cursor "$expected" "$level"
+    launch=$(cat "$LAUNCH_LOG")
+    assert_contains "$launch" "--model '$expected'" \
+      "cursor effort $level did not resolve to $expected"
+    # A -fast sibling exists for every rung and is never an implicit default.
+    assert_not_contains "$launch" "-fast" \
+      "cursor effort $level must not silently select a -fast variant"
+  done <<'LADDER'
+low cursor-grok-4.6-low
+medium cursor-grok-4.6-medium
+high cursor-grok-4.6-high
+xhigh cursor-grok-4.6-xhigh
+max cursor-grok-4.6-xhigh
+LADDER
+  pass "cursor resolves every effort level to a listed non-fast model"
+}
+
+# The ladder claim above is only meaningful if a derived id is actually subject
+# to catalog validation, so pin the refusal on a catalog that omits the family.
+test_cursor_rejects_effort_derived_model_missing_from_catalog() {
+  local rec id out status
+  id=profile-cursor-derived-unlisted-z25
+  rec=$(make_spawn_case profile-cursor-derived-unlisted cursor "$id")
+  read_case_record "$rec"
+
+  out=$(FM_TEST_CURSOR_MODELS='Available models\ncursor-grok-4.5-low - Cursor Grok 4.5 Low\ncursor-grok-4.5-high - Cursor Grok 4.5' \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --effort xhigh)
+  status=$?
+  expect_code 1 "$status" "cursor spawn should refuse an effort-derived model the catalog omits"
+  assert_contains "$out" "Cursor model 'cursor-grok-4.6-xhigh', derived from the requested effort 'xhigh'" \
+    "cursor refusal did not name the effort the rejected id was derived from"
+  assert_contains "$out" "is not available from" \
+    "cursor did not report the catalog diagnostic for an effort-derived model"
+  assert_contains "$out" "--list-models" \
+    "cursor refusal did not tell the caller how to find valid ids"
+  assert_contains "$out" "pass an explicit --model listed by that command" \
+    "cursor refusal did not name the escape that works for a derived id"
+  assert_not_contains "$out" "or omit --model" \
+    "cursor refusal told the caller to omit a --model they never passed"
+  [ ! -f "$HOME_DIR/state/$id.meta" ] || fail "refused cursor spawn still recorded task metadata"
+  [ ! -s "$LAUNCH_LOG" ] || fail "effort-derived model refusal must happen before launch"
+  pass "cursor refuses an effort-derived model the live catalog does not list"
 }
 
 
@@ -911,6 +993,9 @@ test_opencode_threads_model_and_ignores_effort_axis
 test_cursor_maps_effort_when_model_is_the_default_sentinel
 test_cursor_preserves_unrelated_explicit_model
 test_cursor_preserves_explicit_in_family_model
+test_cursor_preserves_explicit_legacy_family_model
+test_cursor_effort_ladder_resolves_listed_models_at_every_level
+test_cursor_rejects_effort_derived_model_missing_from_catalog
 test_pi_threads_model_and_max_effort
 test_pi_tui_mode_probe_is_safe_for_old_and_new_pi
 test_pi_signed_threads_shared_pi_profile_and_preserves_identity
