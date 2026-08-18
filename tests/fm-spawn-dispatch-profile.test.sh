@@ -738,8 +738,16 @@ test_cursor_rejects_effort_derived_model_missing_from_catalog() {
     run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --effort xhigh)
   status=$?
   expect_code 1 "$status" "cursor spawn should refuse an effort-derived model the catalog omits"
-  assert_contains "$out" "Cursor model 'cursor-grok-4.6-xhigh' is not available from" \
+  assert_contains "$out" "Cursor model 'cursor-grok-4.6-xhigh', derived from the requested effort 'xhigh'" \
+    "cursor refusal did not name the effort the rejected id was derived from"
+  assert_contains "$out" "is not available from" \
     "cursor did not report the catalog diagnostic for an effort-derived model"
+  assert_contains "$out" "--list-models" \
+    "cursor refusal did not tell the caller how to find valid ids"
+  assert_contains "$out" "pass an explicit --model listed by that command" \
+    "cursor refusal did not name the escape that works for a derived id"
+  assert_not_contains "$out" "or omit --model" \
+    "cursor refusal told the caller to omit a --model they never passed"
   [ ! -f "$HOME_DIR/state/$id.meta" ] || fail "refused cursor spawn still recorded task metadata"
   [ ! -s "$LAUNCH_LOG" ] || fail "effort-derived model refusal must happen before launch"
   pass "cursor refuses an effort-derived model the live catalog does not list"

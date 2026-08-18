@@ -270,6 +270,7 @@ KIND=ship
 KIND_SET=0
 HARNESS_ARG=
 MODEL=
+MODEL_ORIGIN=flag
 EFFORT=
 BACKEND_ARG=
 MODE=
@@ -1259,7 +1260,10 @@ esac
 if [ "$KIND" = secondmate ] && [ -z "$ARG3" ]; then
   if [ "$MODEL_SET" -eq 0 ]; then
     SM_MODEL=$("$SCRIPT_DIR/fm-harness.sh" secondmate-model)
-    [ -z "$SM_MODEL" ] || MODEL=$SM_MODEL
+    if [ -n "$SM_MODEL" ]; then
+      MODEL=$SM_MODEL
+      MODEL_ORIGIN=secondmate-config
+    fi
   fi
   if [ "$EFFORT_SET" -eq 0 ]; then
     SM_EFFORT=$("$SCRIPT_DIR/fm-harness.sh" secondmate-effort)
@@ -1287,10 +1291,10 @@ fi
 if [ "$HARNESS" = cursor ] && [ -n "$EFFORT" ] \
    && { [ -z "$MODEL" ] || [ "$MODEL" = default ]; }; then
   case "$EFFORT" in
-    low) MODEL=cursor-grok-4.6-low ;;
-    medium) MODEL=cursor-grok-4.6-medium ;;
-    high) MODEL=cursor-grok-4.6-high ;;
-    xhigh|max) MODEL=cursor-grok-4.6-xhigh ;;
+    low) MODEL=cursor-grok-4.6-low; MODEL_ORIGIN=effort ;;
+    medium) MODEL=cursor-grok-4.6-medium; MODEL_ORIGIN=effort ;;
+    high) MODEL=cursor-grok-4.6-high; MODEL_ORIGIN=effort ;;
+    xhigh|max) MODEL=cursor-grok-4.6-xhigh; MODEL_ORIGIN=effort ;;
   esac
 fi
 
@@ -1301,7 +1305,17 @@ fi
 if [ "$HARNESS" = cursor ] && [ -n "$MODEL" ] && [ "$MODEL" != default ]; then
   if CURSOR_MODELS=$(fm_cursor_list_models "$CURSOR_BIN"); then
     if ! printf '%s\n' "$CURSOR_MODELS" | fm_cursor_catalog_has_model "$MODEL"; then
-      echo "error: Cursor model '$MODEL' is not available from '$CURSOR_BIN --list-models'; choose an id listed by that command or omit --model" >&2
+      case "$MODEL_ORIGIN" in
+        effort)
+          echo "error: Cursor model '$MODEL', derived from the requested effort '$EFFORT' because harness cursor has no effort flag, is not available from '$CURSOR_BIN --list-models'; pass an explicit --model listed by that command, since omitting --model is what selected this id" >&2
+          ;;
+        secondmate-config)
+          echo "error: Cursor model '$MODEL', pinned by config/secondmate-harness, is not available from '$CURSOR_BIN --list-models'; correct that file's model token to an id listed by that command, or pass an explicit --model" >&2
+          ;;
+        *)
+          echo "error: Cursor model '$MODEL' is not available from '$CURSOR_BIN --list-models'; choose an id listed by that command or omit --model" >&2
+          ;;
+      esac
       exit 1
     fi
   fi
