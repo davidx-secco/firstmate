@@ -491,7 +491,9 @@ SH
   fm_fake_exit0 "$fakebin" treehouse
   mkdir -p "$home/data/$id" "$home/projects" "$home/state" "$home/config"
   fm_git_worktree "$proj" "$wt" "wt-$name"
-  git -C "$proj" remote add origin "$origin"
+  # fm_git_worktree seeds its own local bare origin, so point that existing
+  # remote at the forge URL under test rather than adding a second one.
+  git -C "$proj" remote set-url origin "$origin"
   printf 'brief for %s\n' "$id" > "$home/data/$id/brief.md"
   touch "$home/state/.last-watcher-beat"
   : > "$log"
