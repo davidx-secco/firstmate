@@ -575,7 +575,10 @@ test_cursor_refuses_model_absent_from_live_catalog() {
 }
 
 test_cursor_failed_catalog_probe_does_not_block_spawn() {
-  local rec id out status launch
+  # FM_TEST_CURSOR_LIST_STATUS is declared local here so the forced probe
+  # failure cannot leak into later cases and silently disable their catalog
+  # validation.
+  local rec id out status launch FM_TEST_CURSOR_LIST_STATUS
   id=profile-cursor-catalog-unreachable-z6e
   rec=$(make_spawn_case profile-cursor-catalog-unreachable cursor "$id")
   read_case_record "$rec"
@@ -721,6 +724,25 @@ xhigh cursor-grok-4.6-xhigh
 max cursor-grok-4.6-xhigh
 LADDER
   pass "cursor resolves every effort level to a listed non-fast model"
+}
+
+# The ladder claim above is only meaningful if a derived id is actually subject
+# to catalog validation, so pin the refusal on a catalog that omits the family.
+test_cursor_rejects_effort_derived_model_missing_from_catalog() {
+  local rec id out status
+  id=profile-cursor-derived-unlisted-z25
+  rec=$(make_spawn_case profile-cursor-derived-unlisted cursor "$id")
+  read_case_record "$rec"
+
+  out=$(FM_TEST_CURSOR_MODELS='Available models\ncursor-grok-4.5-low - Cursor Grok 4.5 Low\ncursor-grok-4.5-high - Cursor Grok 4.5' \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --effort xhigh)
+  status=$?
+  expect_code 1 "$status" "cursor spawn should refuse an effort-derived model the catalog omits"
+  assert_contains "$out" "Cursor model 'cursor-grok-4.6-xhigh' is not available from" \
+    "cursor did not report the catalog diagnostic for an effort-derived model"
+  [ ! -f "$HOME_DIR/state/$id.meta" ] || fail "refused cursor spawn still recorded task metadata"
+  [ ! -s "$LAUNCH_LOG" ] || fail "effort-derived model refusal must happen before launch"
+  pass "cursor refuses an effort-derived model the live catalog does not list"
 }
 
 
@@ -965,6 +987,7 @@ test_cursor_preserves_unrelated_explicit_model
 test_cursor_preserves_explicit_in_family_model
 test_cursor_preserves_explicit_legacy_family_model
 test_cursor_effort_ladder_resolves_listed_models_at_every_level
+test_cursor_rejects_effort_derived_model_missing_from_catalog
 test_pi_threads_model_and_max_effort
 test_pi_tui_mode_probe_is_safe_for_old_and_new_pi
 test_pi_signed_threads_shared_pi_profile_and_preserves_identity

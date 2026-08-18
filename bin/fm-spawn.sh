@@ -1247,14 +1247,6 @@ case "$HARNESS" in
     # missing install a loud spawn refusal instead of a pane that dies with a
     # command-not-found the supervisor would read as a wedged worker.
     CURSOR_BIN=$(fm_cursor_resolve_binary) || exit 1
-    if [ -n "$MODEL" ] && [ "$MODEL" != default ]; then
-      if CURSOR_MODELS=$(fm_cursor_list_models "$CURSOR_BIN"); then
-        if ! printf '%s\n' "$CURSOR_MODELS" | fm_cursor_catalog_has_model "$MODEL"; then
-          echo "error: Cursor model '$MODEL' is not available from '$CURSOR_BIN --list-models'; choose an id listed by that command or omit --model" >&2
-          exit 1
-        fi
-      fi
-    fi
     ;;
 esac
 
@@ -1300,6 +1292,19 @@ if [ "$HARNESS" = cursor ] && [ -n "$EFFORT" ] \
     high) MODEL=cursor-grok-4.6-high ;;
     xhigh|max) MODEL=cursor-grok-4.6-xhigh ;;
   esac
+fi
+
+# Catalog validation runs here, after every writer of MODEL - the --model flag,
+# the secondmate-harness token fallback, and the effort mapping above - so a
+# derived or config-pinned id gets the same loud pre-launch refusal an explicit
+# --model gets instead of dying as an unusable model inside the pane.
+if [ "$HARNESS" = cursor ] && [ -n "$MODEL" ] && [ "$MODEL" != default ]; then
+  if CURSOR_MODELS=$(fm_cursor_list_models "$CURSOR_BIN"); then
+    if ! printf '%s\n' "$CURSOR_MODELS" | fm_cursor_catalog_has_model "$MODEL"; then
+      echo "error: Cursor model '$MODEL' is not available from '$CURSOR_BIN --list-models'; choose an id listed by that command or omit --model" >&2
+      exit 1
+    fi
+  fi
 fi
 
 secondmate_registry_value() {
