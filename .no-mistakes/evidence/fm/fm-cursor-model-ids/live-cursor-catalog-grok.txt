@@ -1,0 +1,14 @@
+cursor-grok-4.6-high-fast - Cursor Grok 4.6 Fast
+cursor-grok-4.5-high - Cursor Grok 4.5
+cursor-grok-4.5-high-fast - Cursor Grok 4.5 Fast
+cursor-grok-4.6-low - Cursor Grok 4.6 Low
+cursor-grok-4.6-low-fast - Cursor Grok 4.6 Low Fast
+cursor-grok-4.6-medium - Cursor Grok 4.6 Medium
+cursor-grok-4.6-medium-fast - Cursor Grok 4.6 Medium Fast
+cursor-grok-4.6-high - Cursor Grok 4.6
+cursor-grok-4.6-xhigh - Cursor Grok 4.6 Extra High
+cursor-grok-4.6-xhigh-fast - Cursor Grok 4.6 Extra High Fast
+cursor-grok-4.5-low - Cursor Grok 4.5 Low
+cursor-grok-4.5-low-fast - Cursor Grok 4.5 Low Fast
+cursor-grok-4.5-medium - Cursor Grok 4.5 Medium
+cursor-grok-4.5-medium-fast - Cursor Grok 4.5 Medium Fast
