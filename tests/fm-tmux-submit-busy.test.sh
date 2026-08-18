@@ -14,7 +14,7 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 
 test_cursor_busy_signature_is_in_shared_default() {
   printf '%s\n' '→ Add a follow-up    ctrl+c to stop' \
-    | grep -qiE "$FM_TMUX_BUSY_REGEX_DEFAULT" \
+    | grep -qiE "$FM_DELIVERY_BUSY_REGEX_DEFAULT" \
     || fail "Cursor Agent's busy-only stop hint is missing from the shared busy regex"
   # Cursor also needs its own SCOPED signature: harness-scoped matching gives an
   # unregistered harness an empty regex, which would silently classify every
