@@ -52,6 +52,7 @@ Exact command flags and response parsing are owned by `bin/backends/orca.sh` and
 `fm-send.sh` types and verifies composer clearance through the fleet-wide classifier in `bin/fm-composer-lib.sh`, retrying Enter without retyping when a slash popup first fills an argument placeholder.
 The composer read is one bounded tail of the live terminal and never pages backward into scrollback, so a stale startup banner cannot compete with the bottom-anchored composer.
 A bare shell row is `unknown`, not an empty agent composer, and plain-text captures degrade a glyph row carrying trailing text to `unknown` rather than a false `pending`.
+The agent prompt glyphs (`❯`, `›`, `⟩`, `→`) are accepted on a bare row here as they are on every other backend, so a dead shell whose prompt uses one of them reads `empty` rather than `unknown`; this adapter previously narrowed that to Cursor's `→` alone, and the narrowing was deliberately given up when the shared classifier became the single owner of every shape.
 The watcher has no native Orca busy signal, so each harness adapter's semantic lifecycle supplies worker state.
 Grok alone retains its isolated rendered-tail fallback.
 
