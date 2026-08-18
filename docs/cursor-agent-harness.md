@@ -1,7 +1,8 @@
 # Cursor Agent crewmate harness
 
-Cursor Agent is a verified Firstmate runtime for ordinary crewmates and scouts.
-It is not a verified primary firstmate or persistent secondmate harness.
+This is the crewmate-era empirical record, captured on 2026-07-23 against Cursor Agent `2026.07.20-8cc9c0b`, when Cursor was verified for crewmate and scout dispatch only.
+Cursor is now a verified primary and secondmate harness as well, and its launch command, model handling, and composer classification have all changed since this capture.
+[`verification/runtime-backends.md`](verification/runtime-backends.md#cursor-agent-cli) owns the current evidence and supersedes any launch, effort, or composer detail below.
 The launch, profile, and task-local trust mechanics live in `bin/fm-spawn.sh`.
 The operational recovery facts live in `.agents/skills/harness-adapters/SKILL.md`.
 

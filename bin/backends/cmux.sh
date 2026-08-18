@@ -488,6 +488,9 @@ fm_backend_cmux_normalize_key() {  # <key>
     Enter|enter) printf 'enter' ;;
     Escape|escape|Esc|esc) printf 'escape' ;;
     C-c|c-c|ctrl+c|Ctrl+c|Ctrl+C|ctrl-c) printf 'ctrl-c' ;;
+    # C-u clears a composer line. fm-send.sh's muse interrupt path needs it to
+    # drop the prompt muse restores into the composer after Escape.
+    C-u|c-u|ctrl+u|Ctrl+u|Ctrl+U|ctrl-u) printf 'ctrl-u' ;;
     *) printf '%s' "$1" ;;
   esac
 }
@@ -526,92 +529,48 @@ fm_backend_cmux_capture() {  # <target> <lines> [expected-label]
   printf '%s' "$out" | tail -n "$lines"
 }
 
-# fm_backend_cmux_composer_state: classify the composer's own row as
-# empty|pending|unknown. Adapted from the bordered-row branch of herdr's
-# structural classifier (fm_backend_herdr_composer_state) per the build task's
-# explicit direction - this is the highest-risk piece of a new backend's
-# send-and-verify logic, and cmux's `read-screen` gives plain-text capture
-# with no cursor-row primitive and no ANSI style channel like herdr's newer
-# `pane read --format ansi` path. The cmux classifier recognizes either a row
-# enclosed by matching composer borders or a bare row beginning with Cursor
-# Agent's `→` glyph specifically (NOT the generic `❯`/`›` set - a dead shell
-# running a starship/pure-style `❯` prompt must stay unknown here), scanning
-# forward and keeping the LAST match so an earlier composer-shaped line in
-# scrollback never outranks the bottom-anchored composer. Cursor renders its
-# busy stop hint on the composer row itself, so a busy-regex match on the found
-# row short-circuits to empty (a landed submit), mirroring fm_tmux_composer_state.
-FM_BACKEND_CMUX_COMPOSER_LINES=${FM_BACKEND_CMUX_COMPOSER_LINES:-20}
-# Idle placeholders and busy stop hints come from the shared composer owner
-# (FM_COMPOSER_{IDLE,BUSY}_REGEX_DEFAULT, bin/fm-composer-lib.sh) so a newly
-# verified harness's signature is added once fleet-wide, not once per backend.
-# Both references tolerate an unset shared default on purpose, so this adapter
-# still SOURCES under `set -u` in a partial code root that carries it without
-# bin/fm-composer-lib.sh (bin/backends/herdr.sh explains why that matters).
-FM_BACKEND_CMUX_IDLE_RE=${FM_BACKEND_CMUX_IDLE_RE:-${FM_COMPOSER_IDLE_REGEX_DEFAULT:-}}
-FM_BACKEND_CMUX_BARE_PROMPT_RE=${FM_BACKEND_CMUX_BARE_PROMPT_RE:-'^→( |$)'}
-FM_BACKEND_CMUX_BUSY_REGEX_DEFAULT=${FM_COMPOSER_BUSY_REGEX_DEFAULT:-}
+# fm_backend_cmux_composer_capture: the cmux composer screen - a bounded
+# plain-text tail of the surface. cmux's `read-screen` is plain text by
+# construction (its --help: "Read terminal text from a surface as plain
+# text"), which is why the capability descriptor below declares styled=0: the
+# shared classifier then degrades a glyph row carrying trailing text to
+# `unknown` instead of misreading an idle suggestion as unsent input.
+fm_backend_cmux_composer_capture() {  # <target> [expected-label]
+  fm_backend_cmux_capture "$1" "$FM_COMPOSER_CAPTURE_LINES" "${2:-}"
+}
 
-fm_backend_cmux_composer_state() {  # <target> [expected-label] -> empty|pending|unknown
-  local target=$1 expected_label=${2:-} cap line trimmed stripped="" found=0 bordered=0
-  cap=$(fm_backend_cmux_capture "$target" "$FM_BACKEND_CMUX_COMPOSER_LINES" "$expected_label") || { printf 'unknown'; return 0; }
-  while IFS= read -r line; do
-    trimmed="${line#"${line%%[![:space:]]*}"}"
-    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
-    [ -n "$trimmed" ] || continue
-    case "$trimmed" in
-      '│'*'│'|'┃'*'┃'|'|'*'|') bordered=1 ;;
-      *)
-        printf '%s' "$trimmed" | grep -qE "$FM_BACKEND_CMUX_BARE_PROMPT_RE" || continue
-        bordered=0
-        ;;
-    esac
-    stripped=$trimmed
-    found=1
-  done < <(printf '%s\n' "$cap")
-  [ "$found" -eq 1 ] || { printf 'unknown'; return 0; }
-  if [ "$bordered" = 1 ]; then
-    stripped=${stripped//│/}
-    stripped=${stripped//┃/}
-    stripped=${stripped//|/}
-  fi
-  stripped="${stripped#"${stripped%%[![:space:]]*}"}"
-  stripped="${stripped%"${stripped##*[![:space:]]}"}"
-  if [ -n "$stripped" ] \
-     && printf '%s' "$stripped" | grep -qiE "${FM_BUSY_REGEX:-$FM_BACKEND_CMUX_BUSY_REGEX_DEFAULT}"; then
-    printf 'empty'; return 0
-  fi
-  # A bare shape is accepted only for Cursor's own `→` glyph; a dead-shell
-  # prompt cannot reach the shared classifier as an empty composer.
-  fm_composer_classify_content "$bordered" "$stripped" "$FM_BACKEND_CMUX_IDLE_RE"
+# fm_backend_cmux_composer_caps: static capability facts, not logic (see the
+# capability model in bin/fm-composer-lib.sh).
+fm_backend_cmux_composer_caps() {
+  printf 'styled=0\ncursor=0\nidentity=0\nrows=%s\n' "$FM_COMPOSER_CAPTURE_LINES"
+}
+
+# fm_backend_cmux_composer_state: thin adapter - capture plus capabilities in,
+# shared verdict out. Every shape (including the borderless claude row this
+# adapter once carried its own NBSP workaround for) lives in
+# bin/fm-composer-lib.sh, so a new harness shape is taught there once and
+# never here. cmux has no identity probe, so the classifier's identity
+# sentinel resolves to unknown.
+fm_backend_cmux_composer_state() {  # <target> [expected-label] -> empty|pending|pending-unproven|unknown
+  local cap verdict
+  cap=$(fm_backend_cmux_composer_capture "$1" "${2:-}") || { printf 'unknown'; return 0; }
+  verdict=$(fm_composer_classify_screen "$(fm_backend_cmux_composer_caps)" "$cap")
+  [ "$verdict" != need-identity ] || verdict=unknown
+  printf '%s' "$verdict"
 }
 
 # fm_backend_cmux_send_text_submit: type <text> into <target> once (raw,
-# unsubmitted, via send_literal), then submit with a named Enter key, retried
-# (Enter only, never retyped) until the composer's own row reads empty.
-# Mirrors fm_backend_herdr_send_text_submit's ORIGINAL (composer-row)
-# verification strategy: a slash-command popup's first Enter can close the
-# popup and fill an argument-hint placeholder into the composer rather than
-# submitting, which a raw-diff check would misread as "submitted" -
-# classifying the composer row specifically avoids that false positive, so
-# the retry loop correctly sends a second Enter when needed. Herdr's adapter
-# has since moved its own confirmation to a native agent-state read instead
-# (docs/herdr-backend.md "Native agent-state submit confirmation"); cmux has
-# no analogous native primitive, so this composer-row approach remains
-# cmux's own confirmation strategy. Echoes empty|pending|unknown|send-failed, a
-# subset of the proof-carrying submit vocabulary.
+# unsubmitted, via send_literal), then drive the shared verify-and-retry-Enter
+# loop (bin/fm-composer-lib.sh: fm_composer_submit_retry_core) against the
+# shared composer verdict. Echoes empty|pending|unknown|send-failed, a subset
+# of the proof-carrying submit vocabulary.
 fm_backend_cmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle> [expected-label]
-  local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 expected_label=${6:-} i=0 state
+  local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 expected_label=${6:-}
   fm_backend_cmux_parse_target "$target" || { printf 'unknown'; return 0; }
   fm_backend_cmux_send_literal "$target" "$text" "$expected_label" || { printf 'send-failed'; return 0; }
   sleep "$settle"
-  while :; do
-    fm_backend_cmux_send_key "$target" Enter "$expected_label" || true
-    sleep "$sleep_s"
-    state=$(fm_backend_cmux_composer_state "$target" "$expected_label")
-    [ "$state" = pending ] || { printf '%s' "$state"; return 0; }
-    i=$((i + 1))
-    [ "$i" -lt "$retries" ] || { printf 'pending'; return 0; }
-  done
+  fm_composer_submit_retry_core fm_backend_cmux_send_key fm_backend_cmux_composer_state \
+    "$target" "$retries" "$sleep_s" "$expected_label"
 }
 
 # fm_backend_cmux_window_of_workspace: echo "<window_id> <workspace_count>" for

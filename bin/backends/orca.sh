@@ -223,97 +223,34 @@ if (r.terminal && Array.isArray(r.terminal.tail)) {
 '
 }
 
-fm_backend_orca_json_field() {  # <field> <json>
-  local field=$1
-  printf '%s' "$2" | node -e '
-const fs = require("fs");
-const field = process.argv[1];
-const data = JSON.parse(fs.readFileSync(0, "utf8"));
-if (data.ok === false) process.exit(2);
-const r = data.result || {};
-const term = r.terminal || {};
-function scalar(v) {
-  return (typeof v === "string" || typeof v === "number" || typeof v === "boolean") ? String(v) : "";
-}
-let v = "";
-if (field === "limited") v = scalar(r.limited ?? term.limited);
-if (field === "oldestCursor") v = scalar(r.oldestCursor || term.oldestCursor);
-if (field === "nextCursor") v = scalar(r.nextCursor || term.nextCursor);
-if (field === "latestCursor") v = scalar(r.latestCursor || term.latestCursor);
-if (!v) process.exit(1);
-process.stdout.write(v);
-' "$field"
+# fm_backend_orca_composer_capture: the orca composer screen - one bounded
+# tail read of the live terminal. Deliberately NOT the old 200-line
+# backward-paged read: the composer is bottom-anchored, and paging back into
+# scrollback is what let a stale startup banner (codex's bordered
+# "permissions" box) compete with - and once outrank - the live composer.
+fm_backend_orca_composer_capture() {  # <terminal-id> [expected-label]
+  fm_backend_orca_capture "$1" "$FM_COMPOSER_CAPTURE_LINES"
 }
 
-fm_backend_orca_read_text_paged() {  # <terminal-id> <limit>
-  local terminal=$1 limit=${2:-200} out limited oldest cursor_out text older_text
-  fm_backend_orca_tool_check || return 1
-  out=$(orca terminal read --terminal "$terminal" --limit "$limit" --json) || return 1
-  printf '%s' "$out" | fm_backend_orca_json_ok || return 1
-  text=$(fm_backend_orca_json_text "$out") || return 1
-  limited=$(fm_backend_orca_json_field limited "$out" 2>/dev/null || true)
-  oldest=$(fm_backend_orca_json_field oldestCursor "$out" 2>/dev/null || true)
-  if [ "$limited" = true ] && [ -n "$oldest" ]; then
-    cursor_out=$(orca terminal read --terminal "$terminal" --cursor "$oldest" --limit "$limit" --json) || return 1
-    printf '%s' "$cursor_out" | fm_backend_orca_json_ok || return 1
-    older_text=$(fm_backend_orca_json_text "$cursor_out") || return 1
-    text="${older_text}"$'\n'"${text}"
-  fi
-  printf '%s' "$text"
+# fm_backend_orca_composer_caps: static capability facts, not logic (see the
+# capability model in bin/fm-composer-lib.sh). Orca's `terminal read` returns
+# plain text; whether it can emit ANSI is unverified (orca is not installed
+# on the verification machine), so styled stays 0 - the conservative
+# degradation - until a live capture proves otherwise.
+fm_backend_orca_composer_caps() {
+  printf 'styled=0\ncursor=0\nidentity=0\nrows=%s\n' "$FM_COMPOSER_CAPTURE_LINES"
 }
 
-FM_BACKEND_ORCA_COMPOSER_LINES=${FM_BACKEND_ORCA_COMPOSER_LINES:-200}
-# Idle placeholders and busy stop hints come from the shared composer owner
-# (FM_COMPOSER_{IDLE,BUSY}_REGEX_DEFAULT, bin/fm-composer-lib.sh) so a newly
-# verified harness's signature is added once fleet-wide, not once per backend.
-# Both references tolerate an unset shared default on purpose, so this adapter
-# still SOURCES under `set -u` in a partial code root that carries it without
-# bin/fm-composer-lib.sh (bin/backends/herdr.sh explains why that matters).
-FM_BACKEND_ORCA_IDLE_RE=${FM_BACKEND_ORCA_IDLE_RE:-${FM_COMPOSER_IDLE_REGEX_DEFAULT:-}}
-FM_BACKEND_ORCA_BARE_PROMPT_RE=${FM_BACKEND_ORCA_BARE_PROMPT_RE:-'^→( |$)'}
-FM_BACKEND_ORCA_BUSY_REGEX_DEFAULT=${FM_COMPOSER_BUSY_REGEX_DEFAULT:-}
-
-# fm_backend_orca_composer_state: classify the composer's own row - bordered,
-# or bare beginning with Cursor Agent's `→` glyph specifically (NOT the generic
-# `❯`/`›` set, so a dead shell running a starship/pure-style `❯` prompt stays
-# unknown) - as empty|pending|unknown. Cursor renders its busy stop hint on the
-# composer row itself, so a busy-regex match on the found row short-circuits to
-# empty (a landed submit), mirroring fm_tmux_composer_state. Real text stays
-# pending, including a slash-command
-# popup that closed by filling an argument-hint placeholder into the composer;
-# that first Enter selected the popup item, it did not submit the command.
-fm_backend_orca_composer_state() {  # <terminal-id> -> empty|pending|unknown
-  local terminal=$1 cap line trimmed stripped="" found=0 bordered=0
-  cap=$(fm_backend_orca_read_text_paged "$terminal" "$FM_BACKEND_ORCA_COMPOSER_LINES") || { printf 'unknown'; return 0; }
-  while IFS= read -r line; do
-    trimmed="${line#"${line%%[![:space:]]*}"}"
-    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
-    [ -n "$trimmed" ] || continue
-    case "$trimmed" in
-      '│'*'│'|'┃'*'┃'|'|'*'|') bordered=1 ;;
-      *)
-        printf '%s' "$trimmed" | grep -qE "$FM_BACKEND_ORCA_BARE_PROMPT_RE" || continue
-        bordered=0
-        ;;
-    esac
-    stripped=$trimmed
-    found=1
-  done < <(printf '%s\n' "$cap")
-  [ "$found" -eq 1 ] || { printf 'unknown'; return 0; }
-  if [ "$bordered" = 1 ]; then
-    stripped=${stripped//│/}
-    stripped=${stripped//┃/}
-    stripped=${stripped//|/}
-  fi
-  stripped="${stripped#"${stripped%%[![:space:]]*}"}"
-  stripped="${stripped%"${stripped##*[![:space:]]}"}"
-  if [ -n "$stripped" ] \
-     && printf '%s' "$stripped" | grep -qiE "${FM_BUSY_REGEX:-$FM_BACKEND_ORCA_BUSY_REGEX_DEFAULT}"; then
-    printf 'empty'; return 0
-  fi
-  # A bare shape is accepted only for Cursor's own `→` glyph; a dead-shell
-  # prompt cannot reach the shared classifier as an empty composer.
-  fm_composer_classify_content "$bordered" "$stripped" "$FM_BACKEND_ORCA_IDLE_RE"
+# fm_backend_orca_composer_state: thin adapter - capture plus capabilities in,
+# shared verdict out. Every shape (bordered boxes AND the borderless bare-glyph
+# row this adapter never learned, which left every claude/codex/pi/muse steer
+# unconfirmed) lives in bin/fm-composer-lib.sh.
+fm_backend_orca_composer_state() {  # <terminal-id> [expected-label] -> empty|pending|pending-unproven|unknown
+  local cap verdict
+  cap=$(fm_backend_orca_composer_capture "$1") || { printf 'unknown'; return 0; }
+  verdict=$(fm_composer_classify_screen "$(fm_backend_orca_composer_caps)" "$cap")
+  [ "$verdict" != need-identity ] || verdict=unknown
+  printf '%s' "$verdict"
 }
 
 fm_backend_orca_send_key() {  # <terminal-id> <key>
@@ -333,22 +270,18 @@ fm_backend_orca_send_key() {  # <terminal-id> <key>
   esac
 }
 
-# fm_backend_orca_send_text_submit: type <text> once, then retry Enter until
-# the composer row reads empty. Retries send only Enter, so a slash-command
-# popup placeholder fill gets the required second Enter without duplicating text.
+# fm_backend_orca_send_text_submit: type <text> once, then drive the shared
+# verify-and-retry-Enter loop (bin/fm-composer-lib.sh:
+# fm_composer_submit_retry_core) against the shared composer verdict, so a
+# slash-command popup placeholder fill gets the required second Enter without
+# duplicating text.
 fm_backend_orca_send_text_submit() {  # <terminal-id> <text> <retries> <enter-sleep> <settle>
-  local terminal=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 i=0 state
+  local terminal=$1 text=$2 retries=$3 sleep_s=$4 settle=$5
   fm_backend_orca_tool_check || { printf 'send-failed'; return 0; }
   fm_backend_orca_send_literal "$terminal" "$text" || { printf 'send-failed'; return 0; }
   sleep "$settle"
-  while :; do
-    fm_backend_orca_send_key "$terminal" Enter || true
-    sleep "$sleep_s"
-    state=$(fm_backend_orca_composer_state "$terminal")
-    [ "$state" = pending ] || { printf '%s' "$state"; return 0; }
-    i=$((i + 1))
-    [ "$i" -lt "$retries" ] || { printf 'pending'; return 0; }
-  done
+  fm_composer_submit_retry_core fm_backend_orca_send_key fm_backend_orca_composer_state \
+    "$terminal" "$retries" "$sleep_s"
 }
 
 fm_backend_orca_kill() {  # <terminal-id>

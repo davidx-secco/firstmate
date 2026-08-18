@@ -207,7 +207,7 @@ make_toolchain() {
   local dir=$1 fakebin
   fakebin=$(fm_fakebin "$dir")
   fm_fake_exit0 "$fakebin" node chrome-devtools-axi pi-signed
-  fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.45
+  fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.46
   cat > "$fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = --version ]; then
@@ -252,7 +252,7 @@ SH
   cat > "$fakebin/quota-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = --version ]; then
-  printf '%s\n' '0.1.17'
+  printf '%s\n' '0.1.25'
   exit 0
 fi
 exit 0
@@ -377,7 +377,7 @@ test_sweep_respawns_confirmed_dead_secondmate() {
 test_sweep_reports_substituted_harness_on_crew_only_crew_harness() {
   local w fb tmuxfb log out
   w=$(new_world sweep-crew-only-substitution)
-  printf 'cursor\n' > "$w/home/config/crew-harness"
+  printf 'muse\n' > "$w/home/config/crew-harness"
   add_sm_home "$w" sm1 firstmate:fm-sm1
   fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
   log="$w/calls.log"; : > "$log"
@@ -386,7 +386,7 @@ test_sweep_reports_substituted_harness_on_crew_only_crew_harness() {
 
   assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawned after confirmed agent absence on existing endpoint with a substituted harness:" \
     "a harness substitution on the automatic respawn path must be reported without verbose diagnostics"
-  assert_contains "$out" "'cursor' is a crewmate/scout-only harness and cannot back a secondmate" \
+  assert_contains "$out" "'muse' is a crewmate/scout-only harness and cannot back a secondmate" \
     "the reported fact must name the concrete reason for the substitution"
   assert_contains "$out" "resolved to 'claude' instead" \
     "the reported fact must name the harness the secondmate actually launched on"
@@ -504,7 +504,7 @@ test_sweep_reports_missing_endpoint_relaunch_failure() {
 test_sweep_failure_cause_excludes_substitution_notice() {
   local w fb tmuxfb log out
   w=$(new_world sweep-crew-only-failure)
-  printf 'cursor\n' > "$w/home/config/crew-harness"
+  printf 'muse\n' > "$w/home/config/crew-harness"
   add_sm_home "$w" sm1 firstmate:fm-sm1
   fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
   log="$w/calls.log"; : > "$log"
